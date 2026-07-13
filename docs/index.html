@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>杵築市沖 沿岸漁場支援マップ</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎣</text></svg>">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+<style>
+  :root {
+    --panel-bg: rgba(255, 255, 255, 0.94);
+    --text: #1a2433;
+    --muted: #5b6b80;
+    --accent: #0a6ebd;
+    --radius: 10px;
+    --shadow: 0 2px 10px rgba(10, 30, 60, 0.18);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font-family: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif; color: var(--text); }
+  #map { position: absolute; inset: 0; }
+
+  .panel {
+    position: absolute; z-index: 5;
+    background: var(--panel-bg); border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 10px 12px; max-width: min(320px, calc(100vw - 24px));
+  }
+  #info-panel { top: 10px; left: 10px; }
+  #info-panel h1 { font-size: 15px; margin: 0 0 4px; }
+  #obs-date { font-size: 13px; color: var(--muted); }
+  #obs-date strong { color: var(--text); }
+  #stale-warning {
+    display: none; margin-top: 6px; padding: 6px 8px; border-radius: 6px;
+    background: #fdecea; color: #a3271d; font-size: 12px; font-weight: 600;
+  }
+
+  #legend-panel { bottom: 28px; left: 10px; }
+  #legend-title { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+  #legend-bar { height: 12px; border-radius: 6px; margin-bottom: 4px; }
+  #legend-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+  #opacity-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 11px; color: var(--muted); }
+  #opacity-row input { flex: 1; accent-color: var(--accent); }
+
+  #notes-panel { top: 10px; right: 10px; font-size: 12px; }
+  #notes-panel summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+  #notes-panel ul { margin: 8px 0 4px; padding-left: 18px; }
+  #notes-panel li { margin-bottom: 6px; line-height: 1.5; }
+  #notes-panel a { color: var(--accent); }
+
+  #error-box {
+    display: none; position: absolute; z-index: 10; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--panel-bg); border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 18px 22px; font-size: 14px; max-width: 90vw;
+  }
+
+  @media (max-width: 640px) {
+    #notes-panel { top: auto; bottom: 28px; right: 10px; max-width: min(260px, calc(100vw - 24px)); }
+    #legend-panel { bottom: 96px; }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="panel" id="info-panel">
+  <h1>杵築市沖 沿岸漁場支援マップ</h1>
+  <div id="obs-date">読み込み中…</div>
+  <div id="stale-warning"></div>
+</div>
+
+<div class="panel" id="legend-panel">
+  <div id="legend-title">海面水温 (℃)</div>
+  <div id="legend-bar"></div>
+  <div id="legend-labels"><span id="legend-min"></span><span id="legend-mid"></span><span id="legend-max"></span></div>
+  <div id="opacity-row">
+    <span>透明度</span>
+    <input id="opacity" type="range" min="0" max="100" value="90">
+  </div>
+</div>
+
+<details class="panel" id="notes-panel">
+  <summary>注意事項・使い方</summary>
+  <ul>
+    <li><strong>水温の絶対値ではなく、分布と境目（フロント）を見る道具です。</strong>MUR SST は夜間観測主体の解析値のため、日中の実測水温とは数度ずれることがあります。</li>
+    <li>本マップは漁場を保証するものではありません。あくまで参考情報であり、出航判断は利用者ご自身の責任で行ってください。</li>
+    <li>データは1日1回自動更新。観測日が数日前のまま止まっている場合は更新エラーの可能性があります。</li>
+    <li>PC の QGIS では <code>data/latest/sst.tif</code>（COG）を HTTP レイヤとして直接開けます。</li>
+    <li>参考: <a href="https://www.pref.oita.jp/soshiki/15090/beppusokuhou.html" target="_blank" rel="noopener">大分県 海況・魚群速報</a></li>
+  </ul>
+</details>
+
+<div id="error-box"></div>
+
+<script>
+(async function () {
+  const errorBox = document.getElementById("error-box");
+  function showError(msg) {
+    errorBox.textContent = msg;
+    errorBox.style.display = "block";
+  }
+
+  let meta;
+  try {
+    const res = await fetch("./data/latest/meta.json?v=" + Date.now());
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    meta = await res.json();
+  } catch (e) {
+    showError("データ（meta.json）を読み込めませんでした。データ生成がまだ一度も実行されていない可能性があります。");
+    meta = null;
+  }
+
+  const bbox = meta ? meta.bbox : [131.4, 33.2, 132.4, 33.9];
+  const [minLon, minLat, maxLon, maxLat] = bbox;
+  const sst = meta && meta.layers && meta.layers.sst;
+
+  // SST は load イベントを待たず初期スタイルに直接組み込む
+  // （ベースタイル取得に失敗しても水温レイヤは必ず出す）
+  const style = {
+    version: 8,
+    sources: {
+      gsi: {
+        type: "raster",
+        tiles: ["https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png"],
+        tileSize: 256,
+        maxzoom: 18,
+        attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a> | SST: NASA JPL MUR / NOAA CoastWatch'
+      }
+    },
+    layers: [{ id: "gsi", type: "raster", source: "gsi" }]
+  };
+  if (sst) {
+    style.sources.sst = {
+      type: "image",
+      url: "./data/latest/" + sst.png + "?v=" + encodeURIComponent(meta.generated_at),
+      coordinates: [
+        [minLon, maxLat],
+        [maxLon, maxLat],
+        [maxLon, minLat],
+        [minLon, minLat]
+      ]
+    };
+    style.layers.push({
+      id: "sst",
+      type: "raster",
+      source: "sst",
+      paint: { "raster-opacity": 0.9, "raster-resampling": "linear" }
+    });
+  }
+
+  const map = new maplibregl.Map({
+    container: "map",
+    center: [(minLon + maxLon) / 2, (minLat + maxLat) / 2],
+    zoom: 9,
+    style: style
+  });
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }));
+  map.addControl(new maplibregl.ScaleControl({ unit: "metric" }));
+  map.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 30, duration: 0 });
+
+  if (!meta) return;
+  if (!sst) { showError("meta.json に SST レイヤがありません。"); return; }
+
+  // 観測日の表示と鮮度チェック
+  const dateEl = document.getElementById("obs-date");
+  dateEl.innerHTML = "海面水温 観測日: <strong>" + sst.date + "</strong>";
+  const ageDays = Math.floor((Date.now() - new Date(sst.date + "T09:00:00Z")) / 86400000);
+  if (ageDays >= 3) {
+    const warn = document.getElementById("stale-warning");
+    warn.textContent = "⚠ データが " + ageDays + " 日前のものです。自動更新が止まっている可能性があります。";
+    warn.style.display = "block";
+  }
+
+  // 凡例
+  const stops = sst.legend_colors || [];
+  document.getElementById("legend-bar").style.background =
+    "linear-gradient(to right, " + stops.join(", ") + ")";
+  document.getElementById("legend-min").textContent = sst.vmin.toFixed(1);
+  document.getElementById("legend-mid").textContent = ((sst.vmin + sst.vmax) / 2).toFixed(1);
+  document.getElementById("legend-max").textContent = sst.vmax.toFixed(1);
+
+  document.getElementById("opacity").addEventListener("input", function (e) {
+    if (map.isStyleLoaded() || map.getLayer("sst")) {
+      map.setPaintProperty("sst", "raster-opacity", Number(e.target.value) / 100);
+    }
+  });
+})();
+</script>
+</body>
+</html>

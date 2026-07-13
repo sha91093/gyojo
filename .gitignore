@@ -1,0 +1,14 @@
+# 認証情報（絶対にコミットしない）
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 作業ディレクトリ（ダウンロードした生データ）
+work/
+
+# OS
+.DS_Store

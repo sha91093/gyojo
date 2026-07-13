@@ -1,0 +1,48 @@
+name: daily-update
+
+on:
+  schedule:
+    # JST 07:00（MUR の前日データが公開済みの時間帯）
+    - cron: "0 22 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# 手動実行と cron が重なっても二重コミットしない
+concurrency:
+  group: daily-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch and process satellite data
+        run: python -m src.main
+
+      - name: Commit and push updated data
+        # このワークフローは push では起動しないためコミットループは発生しないが、
+        # 将来 push トリガーを足しても安全なよう [skip ci] を付けておく
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/data
+          if git diff --cached --quiet; then
+            echo "変更なし（データ未更新）"
+          else
+            git commit -m "data: update $(date -u +%F) [skip ci]"
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi

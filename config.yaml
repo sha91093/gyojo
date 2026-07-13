@@ -1,0 +1,52 @@
+# =========================================================
+# 沿岸漁場支援マップ 設定ファイル
+# すべてのパラメータはここに集約する（ハードコード禁止）
+# =========================================================
+
+# 対象海域（守江湾・別府湾・伊予灘南部・国東半島沖・姫島周辺）
+# CRS: EPSG:4326
+bbox:
+  min_lon: 131.4
+  max_lon: 132.4
+  min_lat: 33.2
+  max_lat: 33.9
+
+sst:
+  # 取得元: NOAA CoastWatch ERDDAP が再配信する MUR SST v4.1
+  # （NASA JPL PO.DAAC の MUR-JPL-L4-GLOB-v4.1 と同一データ。
+  #   ERDDAP はサーバー側で bbox 切り出しができ、認証不要のため
+  #   日次CIに適する。詳細は README「データ取得経路について」参照）
+  source: erddap
+  erddap:
+    base_url: https://coastwatch.pfeg.noaa.gov/erddap
+    dataset_id: jplMURSST41
+    variable: analysed_sst
+    # MUR の time 座標は毎日 09:00:00Z
+    time_of_day: "09:00:00Z"
+  # 公開ラグ対策: 今日から最大N日遡り、取得できた最新日を採用する
+  lookback_days: 7
+
+  # 表示用カラーレンジ（COG は物理値そのままなので表示にのみ影響）
+  display:
+    colormap: turbo
+    # auto: データの percentile から自動決定（勾配が見やすい）
+    # fixed: vmin/vmax を常に使う（日をまたいだ色の比較がしやすい）
+    range_mode: auto
+    auto_percentiles: [2, 98]
+    # auto のときでも最低これだけの幅 (℃) は確保する
+    min_span: 3.0
+    # fixed のとき、および auto の安全弁
+    vmin: 8.0
+    vmax: 32.0
+
+output:
+  docs_dir: docs
+  data_dir: docs/data
+  # archive/YYYY-MM-DD/ の保持日数。超えた分は削除しリポジトリ肥大化を防ぐ
+  archive_retention_days: 90
+
+web:
+  title: 杵築市沖 沿岸漁場支援マップ
+  # 初期表示の中心とズーム
+  center: [131.9, 33.55]
+  zoom: 9
