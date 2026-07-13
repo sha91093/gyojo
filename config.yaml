@@ -5,11 +5,18 @@
 
 # 対象海域（守江湾・別府湾・伊予灘南部・国東半島沖・姫島周辺）
 # CRS: EPSG:4326
+# 別府湾が矩形端ぎりぎりだとフロント計算が湾内で破綻するため、
+# 表示範囲自体も一回り広く取っている（レビュー A-3）
 bbox:
-  min_lon: 131.4
-  max_lon: 132.4
-  min_lat: 33.2
-  max_lat: 33.9
+  min_lon: 131.2
+  max_lon: 132.6
+  min_lat: 33.0
+  max_lat: 34.1
+
+# 取得時のみ bbox を四方にこの分だけ拡張する。
+# フロント（Sobel）計算後に表示範囲へクリップし、
+# ラスタ端の勾配破綻を表示領域に持ち込まない
+bbox_buffer_deg: 0.15
 
 sst:
   # 取得元: NOAA CoastWatch ERDDAP が再配信する MUR SST v4.1
@@ -21,23 +28,43 @@ sst:
     base_url: https://coastwatch.pfeg.noaa.gov/erddap
     dataset_id: jplMURSST41
     variable: analysed_sst
+    # 推定誤差（℃）。沿岸ピクセルの信頼度表示に使う（レビュー A-2）
+    error_variable: analysis_error
     # MUR の time 座標は毎日 09:00:00Z
     time_of_day: "09:00:00Z"
   # 公開ラグ対策: 今日から最大N日遡り、取得できた最新日を採用する
   lookback_days: 7
 
-  # 表示用カラーレンジ（COG は物理値そのままなので表示にのみ影響）
+  # 表示用カラーレンジ。色付けはブラウザ側（Canvas）で行うため、
+  # ここでの設定は meta.json 経由でフロントエンドに渡される
   display:
     colormap: turbo
-    # auto: データの percentile から自動決定（勾配が見やすい）
-    # fixed: vmin/vmax を常に使う（日をまたいだ色の比較がしやすい）
+    # auto: その日の percentile から自動決定（フロント探しに向く）
+    # fixed: 季節別の固定レンジ（日々の変化の追跡に向く）
+    # どちらを初期表示にするかの既定値。閲覧者はブラウザで切替可能
     range_mode: auto
     auto_percentiles: [2, 98]
     # auto のときでも最低これだけの幅 (℃) は確保する
     min_span: 3.0
-    # fixed のとき、および auto の安全弁
+    # auto レンジの安全弁（これを超えて伸びない）
     vmin: 8.0
     vmax: 32.0
+    # 固定モード用の季節別レンジ
+    fixed_range:
+      summer: [20.0, 30.0]   # 6-10月
+      winter: [10.0, 22.0]   # 11-5月
+
+  # analysis_error がこの値（℃）を超えるピクセルは
+  # 信頼度が低いものとして半透明表示する
+  confidence:
+    error_threshold_c: 0.5
+
+# 水温フロント強度（フェーズ2 / レビュー C-1）
+front:
+  # 表示レンジ上限に使うパーセンタイル
+  vmax_percentile: 98
+  # 表示レンジ上限の下限値 (℃/km)。凪いだ日でもスケールが潰れないように
+  vmax_floor: 0.1
 
 output:
   docs_dir: docs

@@ -1,9 +1,8 @@
 numpy
+scipy
 xarray
 netCDF4
 rioxarray
 rasterio
-matplotlib
-Pillow
 PyYAML
 requests

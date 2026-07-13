@@ -56,9 +56,12 @@
 - 提供元: NASA JPL PO.DAAC
 - コレクション名: `MUR-JPL-L4-GLOB-v4.1`
 - 解像度: 1km / 日次 / **L4解析値のため雲による欠測がない**
-- 取得方法: `podaac-data-downloader` または `podaac-data-subscriber`（pip installable な Python CLI）
-- 認証: NASA Earthdata Login アカウント
-- 主要変数: `analysed_sst`（単位 **ケルビン**。摂氏変換 -273.15 を忘れないこと）、`analysis_error`、`mask`、`sst_anomaly`
+- 取得方法: **NOAA CoastWatch ERDDAP（データセット `jplMURSST41`）の griddap から bbox 指定で部分取得**
+  （当初案の `podaac-data-downloader` は `-b` がファイル絞り込みにしか効かず、MUR は全球1ファイル＝毎日数百MB
+  になるため変更した。ERDDAP はサーバー側切り出しができ1日数十KBで済む。詳細は README 参照）
+- 認証: **不要**（ERDDAP 経由のため。PO.DAAC 直接取得に切り替える場合のみ NASA Earthdata Login が必要）
+- 主要変数: `analysed_sst`（PO.DAAC 直系は**ケルビン**、ERDDAP 配信版は**摂氏**。
+  `process.py` は units 属性で自動判定する）、`analysis_error`（推定誤差。沿岸ピクセルの信頼度表示に使用）
 
 **採用理由**: 雲があっても穴が空かない。日次自動更新の土台にできる唯一の選択肢。
 
@@ -217,11 +220,11 @@ coastal-fishery-map/
 `.env`（ローカル）と GitHub Secrets（CI）に同名で設定する。
 
 ```
-EARTHDATA_USERNAME=
+EARTHDATA_USERNAME=   # フェーズ1では不要（ERDDAP 経由のため）。PO.DAAC 直接取得に切り替える場合のみ
 EARTHDATA_PASSWORD=
-CMEMS_USERNAME=
+CMEMS_USERNAME=       # フェーズ2（クロロフィル）で必要
 CMEMS_PASSWORD=
-GPORTAL_USERNAME=
+GPORTAL_USERNAME=     # フェーズ3（GCOM-C）で必要
 GPORTAL_PASSWORD=
 ```
 
@@ -233,7 +236,9 @@ GPORTAL_PASSWORD=
 
 ## 9. 既知の落とし穴
 
-1. **単位**: MUR の `analysed_sst` はケルビン。摂氏変換を忘れると 290℃ の海になる。
+1. **単位**: PO.DAAC 直系の MUR は `analysed_sst` がケルビン。摂氏変換を忘れると 290℃ の海になる。
+   ※現在使用中の ERDDAP（`jplMURSST41`）は摂氏配信のため変換不要だが、`process.py` の units 自動判定は
+   取得先を切り替えた際の保険として残している。
 2. **タイムラグ**: MUR は観測から公開まで概ね1日程度かかる。「今日のデータ」を要求して404にならないよう、直近N日を遡って取得できた最新日を採用するリトライロジックを入れる。
 3. **フロント強度の単位**: ピクセル単位のままだと解像度の違うデータ間で比較できない。必ず ℃/km に正規化する。
 4. **緯度による歪み**: EPSG:4326 のままだと経度方向の実距離が緯度で変わる。フロント計算では `cos(lat)` 補正を入れるか、UTM（Zone 52N）に再投影してから計算する。

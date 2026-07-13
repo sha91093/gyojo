@@ -23,7 +23,7 @@
   .panel {
     position: absolute; z-index: 5;
     background: var(--panel-bg); border-radius: var(--radius); box-shadow: var(--shadow);
-    padding: 10px 12px; max-width: min(320px, calc(100vw - 24px));
+    padding: 10px 12px; max-width: min(340px, calc(100vw - 24px));
   }
   #info-panel { top: 10px; left: 10px; }
   #info-panel h1 { font-size: 15px; margin: 0 0 4px; }
@@ -33,26 +33,43 @@
 
   #date-nav { display: flex; align-items: center; gap: 6px; }
   #date-nav[hidden] { display: none; }
-  #date-nav button {
+  button.btn {
     border: 1px solid #c8d2de; background: #fff; color: var(--text);
     border-radius: 6px; font-size: 13px; padding: 4px 10px; cursor: pointer;
     touch-action: manipulation;
   }
-  #date-nav button:disabled { opacity: 0.35; cursor: default; }
+  button.btn:disabled { opacity: 0.35; cursor: default; }
   #past-badge {
     display: none; font-size: 11px; font-weight: 700; color: #8a5300;
     background: #fff3d6; border-radius: 5px; padding: 3px 7px;
   }
-  #stale-warning {
-    display: none; margin-top: 6px; padding: 6px 8px; border-radius: 6px;
-    background: #fdecea; color: #a3271d; font-size: 12px; font-weight: 600;
+
+  /* レイヤ・レンジの切替チップ */
+  .chip-row { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; align-items: center; }
+  .chip-row[hidden] { display: none; }
+  .chip-label { font-size: 11px; color: var(--muted); }
+  button.chip {
+    border: 1px solid #c8d2de; background: #fff; color: var(--muted);
+    border-radius: 999px; font-size: 12px; padding: 3px 11px; cursor: pointer;
+    touch-action: manipulation;
+  }
+  button.chip.active {
+    background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+  }
+
+  /* データ鮮度の警告バナー（目立たせる） */
+  #stale-banner {
+    display: none; position: absolute; z-index: 20; top: 0; left: 0; right: 0;
+    background: #c62828; color: #fff; font-size: 13px; font-weight: 700;
+    text-align: center; padding: 8px 12px; box-shadow: var(--shadow);
   }
 
   #legend-panel { bottom: 28px; left: 10px; }
   #legend-title { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
   #legend-bar { height: 12px; border-radius: 6px; margin-bottom: 4px; }
   #legend-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
-  #opacity-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 11px; color: var(--muted); }
+  #legend-note { font-size: 10px; color: var(--muted); margin-top: 5px; line-height: 1.4; }
+  #opacity-row { display: flex; align-items: center; gap: 8px; margin-top: 7px; font-size: 11px; color: var(--muted); }
   #opacity-row input { flex: 1; accent-color: var(--accent); }
 
   #notes-panel { top: 10px; right: 10px; font-size: 12px; }
@@ -68,6 +85,11 @@
     padding: 18px 22px; font-size: 14px; max-width: 90vw;
   }
 
+  .maplibregl-popup-content { font-size: 13px; line-height: 1.6; padding: 8px 12px; }
+  .popup-val { font-size: 16px; font-weight: 700; }
+  .popup-sub { color: var(--muted); font-size: 11px; }
+  .popup-warn { color: #8a5300; font-size: 11px; font-weight: 600; }
+
   /* ズームボタン（右下）が縮尺・帰属表示と重ならないよう少し持ち上げる */
   .maplibregl-ctrl-bottom-right { margin-bottom: 22px; }
 
@@ -76,14 +98,15 @@
     .panel { padding: 6px 9px; border-radius: 8px; }
     #info-panel h1 { font-size: 11px; font-weight: 600; color: var(--muted); margin: 0 0 2px; }
     #obs-date { font-size: 12px; }
-    #date-nav button { font-size: 12px; padding: 2px 8px; }
+    #date-nav button.btn { font-size: 12px; padding: 2px 8px; }
     #past-badge { font-size: 10px; padding: 2px 5px; }
-    #stale-warning { font-size: 11px; padding: 4px 6px; margin-top: 4px; }
+    button.chip { font-size: 11px; padding: 2px 9px; }
 
-    #legend-panel { max-width: 200px; bottom: 24px; }
+    #legend-panel { max-width: 210px; bottom: 24px; }
     #legend-title { font-size: 10px; margin-bottom: 4px; }
     #legend-bar { height: 8px; }
     #legend-labels { font-size: 10px; }
+    #legend-note { font-size: 9px; }
     #opacity-row { font-size: 10px; margin-top: 5px; }
 
     #notes-panel { font-size: 11px; max-width: min(240px, calc(100vw - 24px)); }
@@ -93,25 +116,35 @@
 </head>
 <body>
 <div id="map"></div>
+<div id="stale-banner"></div>
 
 <div class="panel" id="info-panel">
   <h1>杵築市沖 沿岸漁場支援マップ</h1>
   <div id="obs-row">
     <div id="obs-date">読み込み中…</div>
     <div id="date-nav" hidden>
-      <button id="prev-day" title="前の日">◀</button>
-      <button id="next-day" title="次の日">▶</button>
-      <button id="to-latest">最新へ</button>
+      <button class="btn" id="prev-day" title="前の日">◀</button>
+      <button class="btn" id="next-day" title="次の日">▶</button>
+      <button class="btn" id="to-latest">最新へ</button>
       <span id="past-badge">過去データ</span>
     </div>
   </div>
-  <div id="stale-warning"></div>
+  <div class="chip-row" id="layer-row" hidden>
+    <button class="chip active" data-layer="sst">水温</button>
+    <button class="chip" data-layer="front">フロント</button>
+  </div>
+  <div class="chip-row" id="range-row">
+    <span class="chip-label">色:</span>
+    <button class="chip" data-range="auto" title="その日の水温幅に合わせてコントラストを最大化">フロントを探す</button>
+    <button class="chip" data-range="fixed" title="季節固定の色なので日をまたいで比較できる">変化を追う</button>
+  </div>
 </div>
 
 <div class="panel" id="legend-panel">
   <div id="legend-title">海面水温 (℃)</div>
   <div id="legend-bar"></div>
   <div id="legend-labels"><span id="legend-min"></span><span id="legend-mid"></span><span id="legend-max"></span></div>
+  <div id="legend-note"></div>
   <div id="opacity-row">
     <span>透明度</span>
     <input id="opacity" type="range" min="0" max="100" value="90">
@@ -123,9 +156,12 @@
   <ul>
     <li><strong>水温の絶対値ではなく、分布と境目（フロント）を見る道具です。</strong>MUR SST は夜間観測主体の解析値のため、日中の実測水温とは数度ずれることがあります。</li>
     <li>本マップは漁場を保証するものではありません。あくまで参考情報であり、出航判断は利用者ご自身の責任で行ってください。</li>
-    <li>◀ ▶ ボタンで過去のデータ（約90日分）を見られます。色の範囲（凡例）は日ごとに変わる点に注意。</li>
-    <li>データは1日1回自動更新。観測日が数日前のまま止まっている場合は更新エラーの可能性があります。</li>
-    <li>PC の QGIS では <code>data/latest/sst.tif</code>（COG）を HTTP レイヤとして直接開けます。</li>
+    <li><strong>海面をタップすると、その地点の数値が出ます。</strong></li>
+    <li>色の切替: 「フロントを探す」はその日の水温幅でコントラスト最大化、「変化を追う」は季節固定の色なので昨日との比較ができます。</li>
+    <li>「フロント」レイヤは水温の境目の強さ (℃/km)。<strong>暖水と冷水の境目には回遊魚が集まりやすい</strong>とされます。</li>
+    <li><strong>岸から2〜3km以内は陸地の熱の影響を受けるため参考値です。</strong>特に閉鎖性水域（別府湾奥・守江湾内）の値は信頼性が低くなります。薄く表示されている部分は推定誤差が大きい海域です。</li>
+    <li>◀ ▶ ボタンで過去のデータ（約90日分）を見られます。</li>
+    <li>PC の QGIS では <code>data/latest/sst.tif</code> / <code>front.tif</code>（COG）を HTTP レイヤとして直接開けます。</li>
     <li>参考: <a href="https://www.pref.oita.jp/site/nourinsuisan/beppusokuhou.html" target="_blank" rel="noopener">大分県 海況・魚群速報</a></li>
   </ul>
 </details>
@@ -134,6 +170,7 @@
 
 <script>
 (async function () {
+  "use strict";
   const $ = (id) => document.getElementById(id);
   function showError(msg) {
     $("error-box").textContent = msg;
@@ -145,142 +182,312 @@
     return res.json();
   }
 
-  let meta = null;
+  // ---- カラーマップ ----
+  // turbo（matplotlib から生成した 256 色 LUT。多項式近似は端点がずれるため使わない）
+  const TURBO_HEX = "30123b32154333184a341b51351e5836215f37246638276d392a733a2d793b2f803c32863d358b3e38913f3b973f3e9c4040a24143a74146ac4249b1424bb5434eba4451bf4454c34456c74559cb455ccf455ed34661d64664da4666dd4669e0466be3476ee64771e94773eb4776ee4778f0477bf2467df44680f64682f84685fa4687fb458afc458cfd448ffe4391fe4294ff4196ff4099ff3e9bfe3d9efe3ba0fd3aa3fc38a5fb37a8fa35abf833adf731aff52fb2f42eb4f22cb7f02ab9ee28bceb27bee925c0e723c3e422c5e220c7df1fc9dd1ecbda1ccdd81bd0d51ad2d21ad4d019d5cd18d7ca18d9c818dbc518ddc218dec018e0bd19e2bb19e3b91ae4b61ce6b41de7b21fe9af20eaac22ebaa25eca727eea42aefa12cf09e2ff19b32f29835f39438f4913cf58e3ff68a43f78746f8844af8804ef97d52fa7a55fa7659fb735dfc6f61fc6c65fd6969fd666dfe6271fe5f75fe5c79fe597dff5680ff5384ff5188ff4e8bff4b8fff4992ff4796fe4499fe429cfe409ffd3fa1fd3da4fc3ca7fc3aa9fb39acfb38affa37b1f936b4f836b7f735b9f635bcf534bef434c1f334c3f134c6f034c8ef34cbed34cdec34d0ea34d2e935d4e735d7e535d9e436dbe236dde037dfdf37e1dd37e3db38e5d938e7d739e9d539ebd339ecd13aeecf3aefcd3af1cb3af2c93af4c73af5c53af6c33af7c13af8be39f9bc39faba39fbb838fbb637fcb336fcb136fdae35fdac34fea933fea732fea431fea130fe9e2ffe9b2dfe992cfe962bfe932afe9029fd8d27fd8a26fc8725fc8423fb8122fb7e21fa7b1ff9781ef9751df8721cf76f1af66c19f56918f46617f36315f26014f15d13f05b12ef5811ed5510ec530feb500eea4e0de84b0ce7490ce5470be4450ae2430ae14109df3f08dd3d08dc3b07da3907d83706d63506d43305d23105d02f05ce2d04cc2b04ca2a04c82803c52603c32503c12302be2102bc2002b91e02b71d02b41b01b21a01af1801ac1701a91601a71401a41301a112019e10019b0f01980e01950d01920b018e0a018b09028808028507028106027e05027a0403";
+  const TURBO = [];
+  for (let i = 0; i < 256; i++) {
+    TURBO.push([0, 2, 4].map(k => parseInt(TURBO_HEX.substr(i * 6 + k, 2), 16)));
+  }
+  function turbo(t) {
+    t = Math.min(1, Math.max(0, t));
+    return TURBO[Math.round(t * 255)];
+  }
+  // フロント強度用: 弱→ほぼ透明、強→黄→赤
+  function frontColor(t) {
+    t = Math.min(1, Math.max(0, t));
+    const stops = [ [255, 245, 157], [255, 167, 38], [216, 27, 27], [123, 4, 4] ];
+    const x = t * (stops.length - 1);
+    const i = Math.min(stops.length - 2, Math.floor(x));
+    const f = x - i;
+    return stops[i].map((c, k) => Math.round(c + (stops[i + 1][k] - c) * f));
+  }
+  function frontAlpha(t) { return t < 0.08 ? 0 : Math.min(0.92, 0.25 + t * 0.75); }
+
+  const CMAPS = {
+    sst:   { color: turbo,      alpha: () => 0.9 },
+    front: { color: frontColor, alpha: frontAlpha }
+  };
+
+  // ---- 状態 ----
+  let meta = null;           // 表示中の日の meta.json
+  let latestMeta = null;
+  let latestDate = null;
+  let dates = [];
+  let currentIdx = 0;
+  let activeLayer = "sst";   // 'sst' | 'front'
+  let rangeMode = "auto";    // 'auto' | 'fixed'（SSTのみ）
+  let opacity = 0.9;
+  const gridCache = new Map();  // url -> values json
+  let currentGrid = null;       // クリック参照用（表示中レイヤ）
+  let currentSstGrid = null;    // ポップアップの水温表示用
+
+  function dayBase(date) {
+    return date === latestDate ? "./data/latest/" : "./data/archive/" + date + "/";
+  }
+  async function loadGrid(base, file, bust) {
+    const url = base + file;
+    if (!gridCache.has(url)) {
+      gridCache.set(url, await fetchJson(url + (bust ? "?v=" + encodeURIComponent(bust) : "")));
+    }
+    return gridCache.get(url);
+  }
+
+  function currentRange(layerMeta) {
+    if (activeLayer === "front") return [layerMeta.vmin, layerMeta.vmax];
+    return rangeMode === "fixed" && layerMeta.fixed_range
+      ? layerMeta.fixed_range
+      : (layerMeta.auto_range || [layerMeta.vmin, layerMeta.vmax]);
+  }
+
+  // ---- Canvas 描画 → dataURL ----
+  function renderDataURL(grid, layerMeta) {
+    const [vmin, vmax] = currentRange(layerMeta);
+    const cmap = CMAPS[activeLayer];
+    const errTh = layerMeta.error_threshold;
+    const canvas = document.createElement("canvas");
+    canvas.width = grid.width; canvas.height = grid.height;
+    const ctx = canvas.getContext("2d");
+    const img = ctx.createImageData(grid.width, grid.height);
+    const px = img.data;
+    for (let i = 0; i < grid.values.length; i++) {
+      const v = grid.values[i];
+      const o = i * 4;
+      if (v === null || v === undefined) { px[o + 3] = 0; continue; }
+      const t = (v - vmin) / (vmax - vmin);
+      const [r, g, b] = cmap.color(t);
+      let a = cmap.alpha(t);
+      // 推定誤差が大きいピクセルは信頼度低として薄くする
+      if (errTh && grid.errors && grid.errors[i] !== null && grid.errors[i] > errTh) {
+        a *= 0.35;
+      }
+      px[o] = r; px[o + 1] = g; px[o + 2] = b; px[o + 3] = Math.round(a * 255);
+    }
+    ctx.putImageData(img, 0, 0);
+    return canvas.toDataURL("image/png");
+  }
+
+  function gridCoordinates(grid) {
+    const [w, s, e, n] = grid.bbox;
+    return [[w, n], [e, n], [e, s], [w, s]];
+  }
+
+  // ---- 凡例 ----
+  function updateLegend(layerMeta) {
+    const cmap = CMAPS[activeLayer];
+    const [vmin, vmax] = currentRange(layerMeta);
+    const stops = [];
+    for (let i = 0; i <= 16; i++) {
+      const [r, g, b] = cmap.color(i / 16);
+      stops.push("rgb(" + r + "," + g + "," + b + ")");
+    }
+    $("legend-bar").style.background = "linear-gradient(to right, " + stops.join(", ") + ")";
+    const fmt = activeLayer === "front" ? (v) => v.toFixed(2) : (v) => v.toFixed(1);
+    $("legend-min").textContent = fmt(vmin);
+    $("legend-mid").textContent = fmt((vmin + vmax) / 2);
+    $("legend-max").textContent = fmt(vmax);
+    if (activeLayer === "front") {
+      $("legend-title").textContent = "フロント強度 (℃/km)";
+      $("legend-note").textContent = "水温の境目の強さ。帯状に強い場所が「潮目」の候補";
+    } else {
+      $("legend-title").textContent = "海面水温 (℃)";
+      $("legend-note").textContent = "薄い表示＝推定誤差が大きい海域（主に沿岸・湾内は参考値）";
+      if (rangeMode === "fixed") {
+        $("legend-note").textContent += "。色は季節固定（日をまたいで比較可）";
+      }
+    }
+  }
+
+  function updateInfo(layerMeta, isLatest) {
+    $("obs-date").innerHTML = "観測日: <strong>" + layerMeta.date + "</strong>";
+    $("past-badge").style.display = isLatest ? "none" : "inline-block";
+    const banner = $("stale-banner");
+    const ageDays = Math.floor((Date.now() - new Date(layerMeta.date + "T09:00:00Z")) / 86400000);
+    if (isLatest && ageDays >= 3) {
+      banner.textContent = "⚠ データが " + ageDays + " 日前から更新されていません。自動更新が壊れている可能性があります。この水温を今日の海況と思わないでください。";
+      banner.style.display = "block";
+    } else {
+      banner.style.display = "none";
+    }
+  }
+
+  // ---- 初期ロード ----
   try {
-    meta = await fetchJson("./data/latest/meta.json?v=" + Date.now());
+    latestMeta = await fetchJson("./data/latest/meta.json?v=" + Date.now());
   } catch (e) {
     showError("データ（meta.json）を読み込めませんでした。データ生成がまだ一度も実行されていない可能性があります。");
   }
-
-  const bbox = meta ? meta.bbox : [131.4, 33.2, 132.4, 33.9];
-  const [minLon, minLat, maxLon, maxLat] = bbox;
-  const sst = meta && meta.layers && meta.layers.sst;
-
-  // SST は load イベントを待たず初期スタイルに直接組み込む
-  // （ベースタイル取得に失敗しても水温レイヤは必ず出す）
-  const style = {
-    version: 8,
-    sources: {
-      gsi: {
-        type: "raster",
-        tiles: ["https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png"],
-        tileSize: 256,
-        maxzoom: 18,
-        attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a> | SST: NASA JPL MUR / NOAA CoastWatch'
-      }
-    },
-    layers: [{ id: "gsi", type: "raster", source: "gsi" }]
-  };
-  if (sst) {
-    style.sources.sst = {
-      type: "image",
-      url: "./data/latest/" + sst.png + "?v=" + encodeURIComponent(meta.generated_at),
-      coordinates: [
-        [minLon, maxLat],
-        [maxLon, maxLat],
-        [maxLon, minLat],
-        [minLon, minLat]
-      ]
-    };
-    style.layers.push({
-      id: "sst",
-      type: "raster",
-      source: "sst",
-      paint: { "raster-opacity": 0.9, "raster-resampling": "linear" }
-    });
-  }
+  meta = latestMeta;
+  const mapBbox = meta ? meta.bbox : [131.2, 33.0, 132.6, 34.1];
+  const [minLon, minLat, maxLon, maxLat] = mapBbox;
 
   const map = new maplibregl.Map({
     container: "map",
     center: [(minLon + maxLon) / 2, (minLat + maxLat) / 2],
     zoom: 9,
-    style: style
+    style: {
+      version: 8,
+      sources: {
+        gsi: {
+          type: "raster",
+          tiles: ["https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png"],
+          tileSize: 256,
+          maxzoom: 18,
+          attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a> | SST: NASA JPL MUR / NOAA CoastWatch'
+        }
+      },
+      layers: [{ id: "gsi", type: "raster", source: "gsi" }]
+    }
   });
-  // 右上は注意事項パネルと重なるためズームは右下に置く
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
   map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
   map.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 30, duration: 0 });
 
   if (!meta) return;
-  if (!sst) { showError("meta.json に SST レイヤがありません。"); return; }
+  latestDate = meta.layers.sst.date;
+  rangeMode = meta.layers.sst.range_mode === "fixed" ? "fixed" : "auto";
 
-  $("opacity").addEventListener("input", function (e) {
-    if (map.getLayer("sst")) {
-      map.setPaintProperty("sst", "raster-opacity", Number(e.target.value) / 100);
+  // ---- オーバーレイの描画・差し替え ----
+  async function refreshOverlay() {
+    const isLatest = meta === latestMeta;
+    const base = dayBase(meta.layers.sst.date);
+    const bust = isLatest ? meta.generated_at : null;
+
+    let layerMeta = meta.layers[activeLayer];
+    if (!layerMeta) { activeLayer = "sst"; layerMeta = meta.layers.sst; syncChips(); }
+    if (!layerMeta.values) {
+      showError("この日のデータは旧形式のため表示できません。");
+      return;
     }
+    let grid;
+    try {
+      grid = await loadGrid(base, layerMeta.values, bust);
+      currentSstGrid = meta.layers.sst.values
+        ? await loadGrid(base, meta.layers.sst.values, bust) : null;
+    } catch (e) {
+      showError(layerMeta.date + " の値データを読み込めませんでした。");
+      return;
+    }
+    currentGrid = grid;
+    const url = renderDataURL(grid, layerMeta);
+    const coords = gridCoordinates(grid);
+    const src = map.getSource("overlay");
+    if (src) {
+      src.updateImage({ url: url, coordinates: coords });
+    } else {
+      // isStyleLoaded() はタイル取得中も false を返すためガードに使えない。
+      // 即座に追加を試み、スタイル未ロードで失敗したときだけ styledata で再試行する
+      const add = () => {
+        if (map.getSource("overlay")) return;
+        try {
+          map.addSource("overlay", { type: "image", url: url, coordinates: coords });
+          map.addLayer({
+            id: "overlay", type: "raster", source: "overlay",
+            paint: { "raster-opacity": opacity, "raster-resampling": "linear", "raster-fade-duration": 0 }
+          });
+        } catch (e) {
+          map.once("styledata", add);
+        }
+      };
+      add();
+    }
+    updateLegend(layerMeta);
+    updateInfo(layerMeta, isLatest);
+  }
+
+  // ---- UI: レイヤ・レンジ切替 ----
+  function syncChips() {
+    document.querySelectorAll("#layer-row .chip").forEach(b =>
+      b.classList.toggle("active", b.dataset.layer === activeLayer));
+    document.querySelectorAll("#range-row .chip").forEach(b =>
+      b.classList.toggle("active", b.dataset.range === rangeMode));
+    $("range-row").hidden = activeLayer !== "sst";
+  }
+  document.querySelectorAll("#layer-row .chip").forEach(b =>
+    b.addEventListener("click", () => { activeLayer = b.dataset.layer; syncChips(); refreshOverlay(); }));
+  document.querySelectorAll("#range-row .chip").forEach(b =>
+    b.addEventListener("click", () => { rangeMode = b.dataset.range; syncChips(); refreshOverlay(); }));
+  if (meta.layers.front) $("layer-row").hidden = false;
+  syncChips();
+
+  $("opacity").addEventListener("input", (e) => {
+    opacity = Number(e.target.value) / 100;
+    if (map.getLayer("overlay")) map.setPaintProperty("overlay", "raster-opacity", opacity);
   });
 
-  function updateLegend(layer) {
-    $("legend-bar").style.background =
-      "linear-gradient(to right, " + (layer.legend_colors || []).join(", ") + ")";
-    $("legend-min").textContent = layer.vmin.toFixed(1);
-    $("legend-mid").textContent = ((layer.vmin + layer.vmax) / 2).toFixed(1);
-    $("legend-max").textContent = layer.vmax.toFixed(1);
+  // ---- クリックで数値表示 ----
+  const popup = new maplibregl.Popup({ closeButton: true, maxWidth: "260px" });
+  function gridValueAt(grid, lng, lat) {
+    if (!grid) return null;
+    const [w, s, e, n] = grid.bbox;
+    if (lng < w || lng > e || lat < s || lat > n) return null;
+    const col = Math.min(grid.width - 1, Math.floor((lng - w) / (e - w) * grid.width));
+    const row = Math.min(grid.height - 1, Math.floor((n - lat) / (n - s) * grid.height));
+    const i = row * grid.width + col;
+    return {
+      value: grid.values[i],
+      error: grid.errors ? grid.errors[i] : null
+    };
   }
-
-  function updateInfo(layer, isLatest) {
-    $("obs-date").innerHTML = "観測日: <strong>" + layer.date + "</strong>";
-    $("past-badge").style.display = isLatest ? "none" : "inline-block";
-    // 鮮度警告は最新表示のときだけ
-    const warn = $("stale-warning");
-    const ageDays = Math.floor((Date.now() - new Date(layer.date + "T09:00:00Z")) / 86400000);
-    if (isLatest && ageDays >= 3) {
-      warn.textContent = "⚠ データが " + ageDays + " 日前のものです。自動更新が止まっている可能性があります。";
-      warn.style.display = "block";
-    } else {
-      warn.style.display = "none";
+  map.on("click", (ev) => {
+    const { lng, lat } = ev.lngLat;
+    const sstHit = gridValueAt(currentSstGrid, lng, lat);
+    if (!sstHit || sstHit.value === null) { popup.remove(); return; }
+    let html = '<div class="popup-val">' + sstHit.value.toFixed(1) + "℃</div>";
+    if (activeLayer === "front" && currentGrid) {
+      const f = gridValueAt(currentGrid, lng, lat);
+      if (f && f.value !== null) {
+        html += '<div>フロント強度: <strong>' + f.value.toFixed(2) + "</strong> ℃/km</div>";
+      }
     }
-  }
-
-  updateLegend(sst);
-  updateInfo(sst, true);
+    html += '<div class="popup-sub">北緯' + lat.toFixed(2) + " 東経" + lng.toFixed(2);
+    if (sstHit.error !== null && sstHit.error !== undefined) {
+      html += " / 推定誤差 ±" + sstHit.error.toFixed(1) + "℃";
+    }
+    html += "</div>";
+    const th = meta.layers.sst.error_threshold;
+    if (th && sstHit.error !== null && sstHit.error > th) {
+      html += '<div class="popup-warn">※沿岸・湾内のため参考値</div>';
+    }
+    popup.setLngLat(ev.lngLat).setHTML(html).addTo(map);
+  });
 
   // ---- 過去データの日付送り ----
-  const latestDate = sst.date;
-  let dates = [];
   try {
     dates = (await fetchJson("./data/archive/index.json?v=" + Date.now())).dates || [];
-  } catch (e) {
-    // index.json ができる前（初回データ生成前）は日付送りを出さない
-  }
+  } catch (e) { /* index.json ができる前は日付送りを出さない */ }
   if (!dates.includes(latestDate)) dates.push(latestDate);
   dates.sort();
+  currentIdx = dates.indexOf(latestDate);
+  if (dates.length > 1) $("date-nav").hidden = false;
 
-  if (dates.length > 1 || dates[0] !== latestDate) {
-    $("date-nav").hidden = false;
-  }
-  let currentIdx = dates.indexOf(latestDate);
-
+  const metaCache = new Map();
   async function showDate(idx) {
     idx = Math.max(0, Math.min(dates.length - 1, idx));
     const date = dates[idx];
-    const isLatest = date === latestDate;
-    const base = isLatest ? "./data/latest/" : "./data/archive/" + date + "/";
-    let layer = sst;
-    if (!isLatest) {
+    if (date === latestDate) {
+      meta = latestMeta;
+    } else {
+      const url = "./data/archive/" + date + "/meta.json";
       try {
-        layer = (await fetchJson(base + "meta.json")).layers.sst;
-      } catch (e) {
-        showError(date + " のデータを読み込めませんでした。");
-        return;
-      }
+        if (!metaCache.has(url)) metaCache.set(url, await fetchJson(url));
+        meta = metaCache.get(url);
+      } catch (e) { showError(date + " のデータを読み込めませんでした。"); return; }
     }
     currentIdx = idx;
-    const src = map.getSource("sst");
-    if (src) {
-      src.updateImage({ url: base + layer.png + "?v=" + encodeURIComponent(date) });
-    }
-    updateLegend(layer);
-    updateInfo(layer, isLatest);
+    $("layer-row").hidden = !meta.layers.front;
+    popup.remove();
+    await refreshOverlay();
     $("prev-day").disabled = currentIdx === 0;
     $("next-day").disabled = currentIdx === dates.length - 1;
   }
-
   $("prev-day").addEventListener("click", () => showDate(currentIdx - 1));
   $("next-day").addEventListener("click", () => showDate(currentIdx + 1));
-  $("to-latest").addEventListener("click", () => showDate(dates.length - 1));
+  $("to-latest").addEventListener("click", () => showDate(dates.indexOf(latestDate)));
   $("prev-day").disabled = currentIdx === 0;
   $("next-day").disabled = currentIdx === dates.length - 1;
+
+  await refreshOverlay();
 })();
 </script>
 </body>

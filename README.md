@@ -1,24 +1,36 @@
 # 杵築市沖 沿岸漁場支援マップ
 
-杵築市沖（別府湾・伊予灘）を対象とした、衛星海面水温（SST）の日次自動更新マップ。
+杵築市沖（別府湾・伊予灘）を対象とした、衛星海面水温（SST）と水温フロント強度の日次自動更新マップ。
 毎朝 GitHub Actions が衛星データを取得し、GitHub Pages 上の Web マップと QGIS 用 COG を更新します。
 
-仕様の詳細は [PLAN.md](PLAN.md) を参照。現在は**フェーズ1（MUR SST の一本通し）**まで実装済みです。
+仕様の詳細は [PLAN.md](PLAN.md) を参照。フェーズ1（MUR SST の一本通し）と
+フェーズ2の水温フロント強度レイヤまで実装済みです。
 
 ## 仕組み
 
 ```
 GitHub Actions (毎日 JST 07:00)
   └─ src/main.py
-       ├─ fetch_mur.py   MUR SST v4.1 を bbox 指定で取得（NetCDF）
-       ├─ process.py     摂氏変換・切り出し・地理参照
-       └─ export.py      COG / PNG / meta.json を docs/data/ へ出力
+       ├─ fetch_mur.py   MUR SST v4.1 + 推定誤差を bbox+バッファで取得（NetCDF）
+       ├─ process.py     摂氏変換・フロント強度計算（Sobel, ℃/km）・切り出し
+       └─ export.py      COG / 値配列JSON / meta.json を docs/data/ へ出力
             ├─ latest/   常に同名で上書き（Web・QGIS の参照URLを固定）
             └─ archive/YYYY-MM-DD/  過去分（90日で自動削除）
 GitHub Pages (docs/)
-  ├─ index.html          MapLibre の Web マップ（スマホ対応）
-  └─ data/latest/sst.tif QGIS から直接開ける COG
+  ├─ index.html            MapLibre の Web マップ（スマホ対応）
+  └─ data/latest/sst.tif   QGIS から直接開ける COG（front.tif も同様）
 ```
+
+### Web マップの主な機能
+
+- **色付けはブラウザ側の Canvas で実施**（サーバーは物理値の JSON を配るだけ）。
+  「フロントを探す」（その日の水温幅でコントラスト最大化）と
+  「変化を追う」（季節固定レンジ。日をまたいだ比較用）をワンタップで切替できる
+- **海面をタップするとその地点の水温・フロント強度・推定誤差を数値表示**
+- `analysis_error` が閾値（既定 0.5℃）を超えるピクセルは**半透明にして信頼度の低さを可視化**
+  （主に沿岸・湾内。マイクロ波放射計の陸地汚染対策）
+- 観測日が3日以上古いままの場合は**画面上部に赤い警告バナー**を表示
+- ◀ ▶ ボタンで過去データ（90日分）を閲覧可能
 
 ## 初回セットアップ
 
@@ -76,6 +88,8 @@ URL は常に固定なので、一度プロジェクトを作れば開くたび�
 ## 今後のフェーズ
 
 - [x] フェーズ1: MUR SST の一本通し（取得 → COG → Pages → Web/QGIS 表示）
-- [ ] フェーズ2: クロロフィル（Copernicus Marine）+ 水温フロント強度レイヤ
+- [x] フェーズ2a: 水温フロント強度レイヤ（Sobel 勾配, ℃/km, cos(lat) 補正, バッファ取得で端の破綻を回避）
+- [ ] フェーズ2b: クロロフィル（Copernicus Marine。要 CMEMS アカウント + GitHub Secrets）
 - [ ] フェーズ3: GCOM-C/SGLI 250m 高解像度レイヤ（晴天時のみ）
 - [ ] フェーズ4: QGIS プロジェクト（.qgz）の整備
+- [ ] 前日比の差分レイヤ・時系列アニメーション（アーカイブが数日分たまってから）

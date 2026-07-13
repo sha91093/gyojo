@@ -1,7 +1,9 @@
-"""成果物の出力（フェーズ1）。
+"""成果物の出力。
 
-- COG (Cloud Optimized GeoTIFF): QGIS / 解析用。物理値（℃）をそのまま格納
-- カラーマップ適用済み PNG: Web マップのオーバーレイ用
+- COG (Cloud Optimized GeoTIFF): QGIS / 解析用。物理値をそのまま格納
+- 値配列 JSON (sst_values.json / front_values.json): Web マップが
+  ブラウザ側 Canvas で色付けするための生値。カラーレンジの切替や
+  クリックでの数値表示をクライアントだけで実現する
 - meta.json: 観測日・データソース・値域・凡例。Web マップが参照する
 - latest/ は常に同名で上書き（参照URLを固定するため）、archive/ に日付別コピー
 """
@@ -14,43 +16,37 @@ import logging
 import shutil
 from pathlib import Path
 
-import matplotlib
 import numpy as np
 import xarray as xr
 
-matplotlib.use("Agg")
-from matplotlib import colormaps
-from matplotlib.colors import Normalize, to_hex
-from PIL import Image
-
 log = logging.getLogger(__name__)
 
-LEGEND_STOPS = 9  # 凡例グラデーションの色数
+
+def _round_half(x: float, up: bool) -> float:
+    return float(np.ceil(x * 2) / 2) if up else float(np.floor(x * 2) / 2)
 
 
-def _display_range(da: xr.DataArray, disp: dict) -> tuple[float, float]:
-    """表示用カラーレンジを決める（COG の物理値には影響しない）。"""
-    if disp.get("range_mode", "auto") == "fixed":
-        return float(disp["vmin"]), float(disp["vmax"])
-
+def auto_range(values: np.ndarray, disp: dict) -> tuple[float, float]:
+    """自動カラーレンジ（percentile + 最低幅 + 安全弁 + 0.5℃丸め）。"""
     p_lo, p_hi = disp.get("auto_percentiles", [2, 98])
-    values = da.values[np.isfinite(da.values)]
-    vmin = float(np.percentile(values, p_lo))
-    vmax = float(np.percentile(values, p_hi))
+    finite = values[np.isfinite(values)]
+    vmin = float(np.percentile(finite, p_lo))
+    vmax = float(np.percentile(finite, p_hi))
 
-    # 幅が狭すぎるとノイズが強調されるので最低幅を確保
     min_span = float(disp.get("min_span", 3.0))
     if vmax - vmin < min_span:
         mid = (vmax + vmin) / 2
         vmin, vmax = mid - min_span / 2, mid + min_span / 2
 
-    # 安全弁: fixed 用のレンジを超えない
     vmin = max(vmin, float(disp["vmin"]))
     vmax = min(vmax, float(disp["vmax"]))
-    # 0.5℃ 刻みに丸めて凡例を読みやすくする
-    vmin = np.floor(vmin * 2) / 2
-    vmax = np.ceil(vmax * 2) / 2
-    return float(vmin), float(vmax)
+    return _round_half(vmin, up=False), _round_half(vmax, up=True)
+
+
+def fixed_range_for(date: dt.date, disp: dict) -> list[float]:
+    """季節別の固定カラーレンジ（6-10月=summer, 11-5月=winter）。"""
+    season = "summer" if 6 <= date.month <= 10 else "winter"
+    return [float(v) for v in disp["fixed_range"][season]]
 
 
 def write_cog(da: xr.DataArray, path: Path) -> None:
@@ -58,86 +54,136 @@ def write_cog(da: xr.DataArray, path: Path) -> None:
     log.info("COG 出力: %s (%d bytes)", path, path.stat().st_size)
 
 
-def write_png(da: xr.DataArray, path: Path, vmin: float, vmax: float, cmap_name: str) -> None:
-    """カラーマップ適用済み PNG。欠測（陸域）は透明にする。"""
-    data = da.values  # (lat 降順, lon 昇順) = 北が上
-    cmap = colormaps[cmap_name]
-    norm = Normalize(vmin=vmin, vmax=vmax, clip=True)
-    rgba = cmap(norm(data))  # NaN も 0..1 に写るので後で alpha を消す
-    rgba[..., 3] = np.where(np.isfinite(data), 0.9, 0.0)
-    img = Image.fromarray((rgba * 255).astype(np.uint8), mode="RGBA")
-    # ピクセルの粗さを見せないよう Web 表示向けに 4 倍へ拡大（bicubic）
-    img = img.resize((img.width * 4, img.height * 4), Image.BICUBIC)
-    img.save(path, optimize=True)
-    log.info("PNG 出力: %s", path)
+def _to_list(values: np.ndarray, ndigits: int) -> list:
+    """行優先（行0=北端）の1次元リスト。NaN は None。"""
+    flat = np.round(values.astype("float64"), ndigits).ravel()
+    return [None if not np.isfinite(v) else float(v) for v in flat]
 
 
-def _legend_stops(cmap_name: str) -> list[str]:
-    cmap = colormaps[cmap_name]
-    return [to_hex(cmap(i / (LEGEND_STOPS - 1))) for i in range(LEGEND_STOPS)]
-
-
-def write_meta(
+def write_values_json(
     da: xr.DataArray,
     path: Path,
     *,
+    errors: xr.DataArray | None = None,
+    ndigits: int = 2,
+) -> dict:
+    """Canvas 描画・クリック参照用の値配列。行0が北端、列0が西端。
+
+    bbox はグリッドのピクセル外縁（セル中心±半ピクセル）から導出する。
+    こうすると Canvas の貼り付け位置・クリック座標の逆算が COG と一致する。
+    """
+    values = da.values
+    finite = values[np.isfinite(values)]
+    lat = da["lat"].values
+    lon = da["lon"].values
+    half_lat = abs(float(lat[1] - lat[0])) / 2
+    half_lon = abs(float(lon[1] - lon[0])) / 2
+    payload = {
+        "bbox": [
+            round(float(lon.min()) - half_lon, 6),
+            round(float(lat.min()) - half_lat, 6),
+            round(float(lon.max()) + half_lon, 6),
+            round(float(lat.max()) + half_lat, 6),
+        ],
+        "width": int(da.sizes["lon"]),
+        "height": int(da.sizes["lat"]),
+        "values": _to_list(values, ndigits),
+        "stats": {
+            "min": round(float(finite.min()), ndigits),
+            "max": round(float(finite.max()), ndigits),
+            "mean": round(float(finite.mean()), ndigits),
+            "p2": round(float(np.percentile(finite, 2)), ndigits),
+            "p98": round(float(np.percentile(finite, 98)), ndigits),
+        },
+    }
+    if errors is not None:
+        payload["errors"] = _to_list(errors.values, ndigits)
+    path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+    log.info("値配列 JSON 出力: %s (%d bytes)", path, path.stat().st_size)
+    return payload
+
+
+def export_all(
+    *,
+    sst: xr.DataArray,
+    err: xr.DataArray | None,
+    front: xr.DataArray | None,
     date: dt.date,
     source_url: str,
     cfg: dict,
-    vmin: float,
-    vmax: float,
-) -> dict:
-    b = cfg["bbox"]
-    values = da.values[np.isfinite(da.values)]
-    meta = {
-        "layers": {
-            "sst": {
-                "date": date.isoformat(),
-                "source": "MUR SST v4.1 (NASA JPL PO.DAAC / NOAA CoastWatch ERDDAP)",
-                "source_url": source_url,
-                "variable": str(cfg["sst"]["erddap"]["variable"]),
-                "units": "℃",
-                "png": "sst.png",
-                "cog": "sst.tif",
-                "vmin": vmin,
-                "vmax": vmax,
-                "colormap": cfg["sst"]["display"]["colormap"],
-                "legend_colors": _legend_stops(cfg["sst"]["display"]["colormap"]),
-                "stats": {
-                    "min": round(float(values.min()), 2),
-                    "max": round(float(values.max()), 2),
-                    "mean": round(float(values.mean()), 2),
-                },
-            }
-        },
-        "bbox": [b["min_lon"], b["min_lat"], b["max_lon"], b["max_lat"]],
-        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-    }
-    path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    log.info("meta.json 出力: %s", path)
-    return meta
-
-
-def export_all(da: xr.DataArray, *, date: dt.date, source_url: str, cfg: dict) -> None:
+) -> None:
     """latest/ へ出力し、archive/YYYY-MM-DD/ へコピー、古い archive を削除する。"""
     data_dir = Path(cfg["output"]["data_dir"])
     latest = data_dir / "latest"
     latest.mkdir(parents=True, exist_ok=True)
-
+    bbox = cfg["bbox"]
     disp = cfg["sst"]["display"]
-    vmin, vmax = _display_range(da, disp)
-    log.info("表示レンジ: %.1f〜%.1f ℃", vmin, vmax)
 
-    write_cog(da, latest / "sst.tif")
-    write_png(da, latest / "sst.png", vmin, vmax, disp["colormap"])
-    write_meta(
-        da, latest / "meta.json",
-        date=date, source_url=source_url, cfg=cfg, vmin=vmin, vmax=vmax,
+    # --- SST ---
+    write_cog(sst, latest / "sst.tif")
+    sst_payload = write_values_json(sst, latest / "sst_values.json", errors=err)
+    vmin, vmax = auto_range(sst.values, disp)
+
+    sst_meta = {
+        "date": date.isoformat(),
+        "source": "MUR SST v4.1 (NASA JPL PO.DAAC / NOAA CoastWatch ERDDAP)",
+        "source_url": source_url,
+        "variable": str(cfg["sst"]["erddap"]["variable"]),
+        "units": "℃",
+        "cog": "sst.tif",
+        "values": "sst_values.json",
+        "range_mode": disp.get("range_mode", "auto"),
+        "auto_range": [vmin, vmax],
+        "fixed_range": fixed_range_for(date, disp),
+        # 後方互換（旧フロントエンドが参照）
+        "vmin": vmin,
+        "vmax": vmax,
+        "error_threshold": float(cfg["sst"]["confidence"]["error_threshold_c"]),
+        "stats": sst_payload["stats"],
+    }
+
+    layers = {"sst": sst_meta}
+    written = ["sst.tif", "sst_values.json"]
+
+    # --- フロント強度 ---
+    if front is not None:
+        write_cog(front, latest / "front.tif")
+        front_payload = write_values_json(
+            front, latest / "front_values.json", ndigits=3
+        )
+        fcfg = cfg.get("front", {})
+        pct = float(fcfg.get("vmax_percentile", 98))
+        finite = front.values[np.isfinite(front.values)]
+        fvmax = max(
+            float(np.percentile(finite, pct)), float(fcfg.get("vmax_floor", 0.1))
+        )
+        layers["front"] = {
+            "date": date.isoformat(),
+            "source": "MUR SST から算出（Sobel 勾配, ℃/km, cos(lat) 補正済み）",
+            "units": "℃/km",
+            "cog": "front.tif",
+            "values": "front_values.json",
+            "vmin": 0.0,
+            "vmax": round(fvmax, 3),
+            "stats": front_payload["stats"],
+        }
+        written += ["front.tif", "front_values.json"]
+
+    meta = {
+        "layers": layers,
+        "bbox": [bbox["min_lon"], bbox["min_lat"], bbox["max_lon"], bbox["max_lat"]],
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+    }
+    (latest / "meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    written.append("meta.json")
+    log.info("meta.json 出力: %s", latest / "meta.json")
 
+    # --- archive ---
     archive = data_dir / "archive" / date.isoformat()
     archive.mkdir(parents=True, exist_ok=True)
-    for name in ("sst.tif", "sst.png", "meta.json"):
+    for name in written:
         shutil.copy2(latest / name, archive / name)
     log.info("archive へコピー: %s", archive)
 

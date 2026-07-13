@@ -1,9 +1,10 @@
-"""エントリポイント（フェーズ1: MUR SST）。
+"""エントリポイント。
 
 使い方:
     python -m src.main [--config config.yaml]
 
-取得 → 前処理 → COG/PNG/meta.json 出力 までを一本で実行する。
+取得 → 前処理 → フロント計算 → COG / 値配列JSON / meta.json 出力 までを
+一本で実行する。
 """
 
 from __future__ import annotations
@@ -32,12 +33,24 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
+    bbox = cfg["bbox"]
 
     result = fetch_mur.fetch_latest(cfg, Path(args.work_dir))
-    da = process.load_sst(result.path, cfg)
-    export.export_all(da, date=result.date, source_url=result.source_url, cfg=cfg)
 
-    log.info("完了: %s の SST を公開ディレクトリへ出力しました", result.date)
+    # バッファ付きグリッドのままフロントを計算し、表示範囲へクリップする
+    sst_buf, err_buf = process.load_dataset(result.path, cfg)
+    front_buf = process.compute_front(sst_buf)
+
+    sst = process.clip_bbox(sst_buf, bbox)
+    err = process.clip_bbox(err_buf, bbox) if err_buf is not None else None
+    front = process.clip_bbox(front_buf, bbox)
+
+    export.export_all(
+        sst=sst, err=err, front=front,
+        date=result.date, source_url=result.source_url, cfg=cfg,
+    )
+
+    log.info("完了: %s の SST / フロントを公開ディレクトリへ出力しました", result.date)
     return 0
 
 

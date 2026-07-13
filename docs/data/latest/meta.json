@@ -6,26 +6,26 @@
       "source_url": "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.nc?analysed_sst[(2026-07-11T09:00:00Z):(2026-07-11T09:00:00Z)][(33.2):(33.9)][(131.4):(132.4)]",
       "variable": "analysed_sst",
       "units": "℃",
-      "png": "sst.png",
       "cog": "sst.tif",
+      "values": "sst_values.json",
+      "range_mode": "auto",
+      "auto_range": [
+        23.0,
+        26.5
+      ],
+      "fixed_range": [
+        20.0,
+        30.0
+      ],
       "vmin": 23.0,
       "vmax": 26.5,
-      "colormap": "turbo",
-      "legend_colors": [
-        "#30123b",
-        "#466be3",
-        "#28bceb",
-        "#32f298",
-        "#a4fc3c",
-        "#eecf3a",
-        "#fb7e21",
-        "#d02f05",
-        "#7a0403"
-      ],
+      "error_threshold": 0.5,
       "stats": {
         "min": 23.33,
         "max": 26.69,
-        "mean": 24.26
+        "mean": 24.26,
+        "p2": 23.42,
+        "p98": 25.82
       }
     }
   },
@@ -35,5 +35,5 @@
     132.4,
     33.9
   ],
-  "generated_at": "2026-07-13T07:49:57+00:00"
+  "generated_at": "2026-07-13T13:46:32+00:00"
 }

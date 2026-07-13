@@ -3,8 +3,12 @@
 NOAA CoastWatch ERDDAP の griddap から bbox 指定で NetCDF を部分取得する。
 配信データは NASA JPL PO.DAAC の MUR-JPL-L4-GLOB-v4.1 と同一。
 
-MUR は観測から公開まで概ね1日程度かかるため、今日から lookback_days 日
-遡って、取得できた最新日を採用する。
+- analysed_sst に加えて analysis_error（推定誤差）も取得する。
+  沿岸ピクセルの信頼度表示に使う
+- 取得範囲は bbox + bbox_buffer_deg。フロント計算のラスタ端破綻を
+  表示領域に持ち込まないためのバッファ
+- MUR は観測から公開まで概ね1日程度かかるため、今日から lookback_days 日
+  遡って、取得できた最新日を採用する
 """
 
 from __future__ import annotations
@@ -28,17 +32,32 @@ class FetchResult:
     source_url: str
 
 
+def buffered_bbox(cfg: dict) -> dict:
+    """取得用に四方へ bbox_buffer_deg だけ広げた bbox。"""
+    b = cfg["bbox"]
+    buf = float(cfg.get("bbox_buffer_deg", 0.0))
+    return {
+        "min_lon": round(b["min_lon"] - buf, 6),
+        "max_lon": round(b["max_lon"] + buf, 6),
+        "min_lat": round(b["min_lat"] - buf, 6),
+        "max_lat": round(b["max_lat"] + buf, 6),
+    }
+
+
 def _griddap_url(cfg: dict, date: dt.date) -> str:
     e = cfg["sst"]["erddap"]
-    b = cfg["bbox"]
+    b = buffered_bbox(cfg)
     t = f"{date.isoformat()}T{e['time_of_day'].rstrip('Z')}Z"
-    return (
-        f"{e['base_url']}/griddap/{e['dataset_id']}.nc"
-        f"?{e['variable']}"
+    dims = (
         f"[({t}):({t})]"
         f"[({b['min_lat']}):({b['max_lat']})]"
         f"[({b['min_lon']}):({b['max_lon']})]"
     )
+    variables = [e["variable"]]
+    if e.get("error_variable"):
+        variables.append(e["error_variable"])
+    query = ",".join(f"{v}{dims}" for v in variables)
+    return f"{e['base_url']}/griddap/{e['dataset_id']}.nc?{query}"
 
 
 def _latest_available_date(cfg: dict) -> dt.date | None:
