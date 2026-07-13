@@ -29,6 +29,18 @@
   #info-panel h1 { font-size: 15px; margin: 0 0 4px; }
   #obs-date { font-size: 13px; color: var(--muted); }
   #obs-date strong { color: var(--text); }
+
+  #date-nav { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  #date-nav button {
+    border: 1px solid #c8d2de; background: #fff; color: var(--text);
+    border-radius: 6px; font-size: 13px; padding: 4px 10px; cursor: pointer;
+    touch-action: manipulation;
+  }
+  #date-nav button:disabled { opacity: 0.35; cursor: default; }
+  #past-badge {
+    display: none; font-size: 11px; font-weight: 700; color: #8a5300;
+    background: #fff3d6; border-radius: 5px; padding: 3px 7px;
+  }
   #stale-warning {
     display: none; margin-top: 6px; padding: 6px 8px; border-radius: 6px;
     background: #fdecea; color: #a3271d; font-size: 12px; font-weight: 600;
@@ -54,9 +66,17 @@
     padding: 18px 22px; font-size: 14px; max-width: 90vw;
   }
 
+  /* ズームボタン（右下）が縮尺・帰属表示と重ならないよう少し持ち上げる */
+  .maplibregl-ctrl-bottom-right { margin-bottom: 22px; }
+
   @media (max-width: 640px) {
-    #notes-panel { top: auto; bottom: 28px; right: 10px; max-width: min(260px, calc(100vw - 24px)); }
-    #legend-panel { bottom: 96px; }
+    #notes-panel { max-width: min(240px, calc(100vw - 24px)); }
+    #legend-panel { max-width: 230px; }
+  }
+  /* 横持ちスマホなど高さが低い画面では注意事項を凡例側に寄せない */
+  @media (max-height: 520px) {
+    .panel { padding: 8px 10px; }
+    #info-panel h1 { font-size: 13px; }
   }
 </style>
 </head>
@@ -66,6 +86,12 @@
 <div class="panel" id="info-panel">
   <h1>杵築市沖 沿岸漁場支援マップ</h1>
   <div id="obs-date">読み込み中…</div>
+  <div id="date-nav" hidden>
+    <button id="prev-day" title="前の日">◀</button>
+    <button id="next-day" title="次の日">▶</button>
+    <button id="to-latest">最新へ</button>
+    <span id="past-badge">過去データ</span>
+  </div>
   <div id="stale-warning"></div>
 </div>
 
@@ -84,6 +110,7 @@
   <ul>
     <li><strong>水温の絶対値ではなく、分布と境目（フロント）を見る道具です。</strong>MUR SST は夜間観測主体の解析値のため、日中の実測水温とは数度ずれることがあります。</li>
     <li>本マップは漁場を保証するものではありません。あくまで参考情報であり、出航判断は利用者ご自身の責任で行ってください。</li>
+    <li>◀ ▶ ボタンで過去のデータ（約90日分）を見られます。色の範囲（凡例）は日ごとに変わる点に注意。</li>
     <li>データは1日1回自動更新。観測日が数日前のまま止まっている場合は更新エラーの可能性があります。</li>
     <li>PC の QGIS では <code>data/latest/sst.tif</code>（COG）を HTTP レイヤとして直接開けます。</li>
     <li>参考: <a href="https://www.pref.oita.jp/soshiki/15090/beppusokuhou.html" target="_blank" rel="noopener">大分県 海況・魚群速報</a></li>
@@ -94,20 +121,22 @@
 
 <script>
 (async function () {
-  const errorBox = document.getElementById("error-box");
+  const $ = (id) => document.getElementById(id);
   function showError(msg) {
-    errorBox.textContent = msg;
-    errorBox.style.display = "block";
+    $("error-box").textContent = msg;
+    $("error-box").style.display = "block";
+  }
+  async function fetchJson(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return res.json();
   }
 
-  let meta;
+  let meta = null;
   try {
-    const res = await fetch("./data/latest/meta.json?v=" + Date.now());
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    meta = await res.json();
+    meta = await fetchJson("./data/latest/meta.json?v=" + Date.now());
   } catch (e) {
     showError("データ（meta.json）を読み込めませんでした。データ生成がまだ一度も実行されていない可能性があります。");
-    meta = null;
   }
 
   const bbox = meta ? meta.bbox : [131.4, 33.2, 132.4, 33.9];
@@ -154,36 +183,91 @@
     zoom: 9,
     style: style
   });
-  map.addControl(new maplibregl.NavigationControl({ showCompass: false }));
-  map.addControl(new maplibregl.ScaleControl({ unit: "metric" }));
+  // 右上は注意事項パネルと重なるためズームは右下に置く
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
+  map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
   map.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 30, duration: 0 });
 
   if (!meta) return;
   if (!sst) { showError("meta.json に SST レイヤがありません。"); return; }
 
-  // 観測日の表示と鮮度チェック
-  const dateEl = document.getElementById("obs-date");
-  dateEl.innerHTML = "海面水温 観測日: <strong>" + sst.date + "</strong>";
-  const ageDays = Math.floor((Date.now() - new Date(sst.date + "T09:00:00Z")) / 86400000);
-  if (ageDays >= 3) {
-    const warn = document.getElementById("stale-warning");
-    warn.textContent = "⚠ データが " + ageDays + " 日前のものです。自動更新が止まっている可能性があります。";
-    warn.style.display = "block";
-  }
-
-  // 凡例
-  const stops = sst.legend_colors || [];
-  document.getElementById("legend-bar").style.background =
-    "linear-gradient(to right, " + stops.join(", ") + ")";
-  document.getElementById("legend-min").textContent = sst.vmin.toFixed(1);
-  document.getElementById("legend-mid").textContent = ((sst.vmin + sst.vmax) / 2).toFixed(1);
-  document.getElementById("legend-max").textContent = sst.vmax.toFixed(1);
-
-  document.getElementById("opacity").addEventListener("input", function (e) {
-    if (map.isStyleLoaded() || map.getLayer("sst")) {
+  $("opacity").addEventListener("input", function (e) {
+    if (map.getLayer("sst")) {
       map.setPaintProperty("sst", "raster-opacity", Number(e.target.value) / 100);
     }
   });
+
+  function updateLegend(layer) {
+    $("legend-bar").style.background =
+      "linear-gradient(to right, " + (layer.legend_colors || []).join(", ") + ")";
+    $("legend-min").textContent = layer.vmin.toFixed(1);
+    $("legend-mid").textContent = ((layer.vmin + layer.vmax) / 2).toFixed(1);
+    $("legend-max").textContent = layer.vmax.toFixed(1);
+  }
+
+  function updateInfo(layer, isLatest) {
+    $("obs-date").innerHTML = "海面水温 観測日: <strong>" + layer.date + "</strong>";
+    $("past-badge").style.display = isLatest ? "none" : "inline-block";
+    // 鮮度警告は最新表示のときだけ
+    const warn = $("stale-warning");
+    const ageDays = Math.floor((Date.now() - new Date(layer.date + "T09:00:00Z")) / 86400000);
+    if (isLatest && ageDays >= 3) {
+      warn.textContent = "⚠ データが " + ageDays + " 日前のものです。自動更新が止まっている可能性があります。";
+      warn.style.display = "block";
+    } else {
+      warn.style.display = "none";
+    }
+  }
+
+  updateLegend(sst);
+  updateInfo(sst, true);
+
+  // ---- 過去データの日付送り ----
+  const latestDate = sst.date;
+  let dates = [];
+  try {
+    dates = (await fetchJson("./data/archive/index.json?v=" + Date.now())).dates || [];
+  } catch (e) {
+    // index.json ができる前（初回データ生成前）は日付送りを出さない
+  }
+  if (!dates.includes(latestDate)) dates.push(latestDate);
+  dates.sort();
+
+  if (dates.length > 1 || dates[0] !== latestDate) {
+    $("date-nav").hidden = false;
+  }
+  let currentIdx = dates.indexOf(latestDate);
+
+  async function showDate(idx) {
+    idx = Math.max(0, Math.min(dates.length - 1, idx));
+    const date = dates[idx];
+    const isLatest = date === latestDate;
+    const base = isLatest ? "./data/latest/" : "./data/archive/" + date + "/";
+    let layer = sst;
+    if (!isLatest) {
+      try {
+        layer = (await fetchJson(base + "meta.json")).layers.sst;
+      } catch (e) {
+        showError(date + " のデータを読み込めませんでした。");
+        return;
+      }
+    }
+    currentIdx = idx;
+    const src = map.getSource("sst");
+    if (src) {
+      src.updateImage({ url: base + layer.png + "?v=" + encodeURIComponent(date) });
+    }
+    updateLegend(layer);
+    updateInfo(layer, isLatest);
+    $("prev-day").disabled = currentIdx === 0;
+    $("next-day").disabled = currentIdx === dates.length - 1;
+  }
+
+  $("prev-day").addEventListener("click", () => showDate(currentIdx - 1));
+  $("next-day").addEventListener("click", () => showDate(currentIdx + 1));
+  $("to-latest").addEventListener("click", () => showDate(dates.length - 1));
+  $("prev-day").disabled = currentIdx === 0;
+  $("next-day").disabled = currentIdx === dates.length - 1;
 })();
 </script>
 </body>

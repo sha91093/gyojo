@@ -142,6 +142,24 @@ def export_all(da: xr.DataArray, *, date: dt.date, source_url: str, cfg: dict) -
     log.info("archive へコピー: %s", archive)
 
     _prune_archive(data_dir / "archive", int(cfg["output"]["archive_retention_days"]))
+    _write_archive_index(data_dir / "archive")
+
+
+def _write_archive_index(archive_root: Path) -> None:
+    """閲覧可能な過去データの日付一覧。Web マップの日付送りUIが参照する。"""
+    dates = []
+    for child in sorted(archive_root.iterdir()):
+        if not child.is_dir():
+            continue
+        try:
+            dt.date.fromisoformat(child.name)
+        except ValueError:
+            continue
+        dates.append(child.name)
+    (archive_root / "index.json").write_text(
+        json.dumps({"dates": dates}, indent=2), encoding="utf-8"
+    )
+    log.info("archive index 出力: %d 日分", len(dates))
 
 
 def _prune_archive(archive_root: Path, retention_days: int) -> None:
