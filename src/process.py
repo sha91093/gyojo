@@ -118,6 +118,20 @@ def compute_front(sst: xr.DataArray) -> xr.DataArray:
     - バッファ付きグリッドに対して呼び、結果を clip_bbox すること
     """
     data = sst.values.astype("float64")
+    valid = np.isfinite(data)
+
+    # 陸(NaN)を最近傍の海面値で埋めてから微分する。
+    # そのまま Sobel をかけると 3x3 カーネルが NaN を拾い、岸から1pxの
+    # 海ピクセルまで NaN に汚染される（実測で海の9.4%、別府湾域は14.7%が
+    # 欠損した）。潮汐フロントは湾口・海峡などの沿岸にこそ立つため、
+    # ここを落とすと一番見たい場所が消える。
+    # 最近傍埋めは岸沿いの勾配をやや過小評価する点に注意（NaN全落ちよりマシ）。
+    if valid.any() and not valid.all():
+        idx = ndimage.distance_transform_edt(
+            ~valid, return_distances=False, return_indices=True
+        )
+        data = data[tuple(idx)]
+
     lat = sst["lat"].values
     lon = sst["lon"].values
 
@@ -132,8 +146,8 @@ def compute_front(sst: xr.DataArray) -> xr.DataArray:
     gy = ndimage.sobel(data, axis=0, mode="nearest") / 8.0 / dy_km
     strength = np.hypot(gx, gy).astype("float32")
 
-    # 欠測（陸）に隣接するピクセルは勾配が計算できないので NaN のままにする
-    strength[~np.isfinite(data)] = np.nan
+    # 陸のみ再マスクする（海ピクセルは岸沿いも含めて全て残る）
+    strength[~valid] = np.nan
 
     front = xr.DataArray(
         strength,
@@ -148,3 +162,23 @@ def compute_front(sst: xr.DataArray) -> xr.DataArray:
         float(np.nanmax(strength)), float(np.nanpercentile(strength, 98)),
     )
     return front
+
+
+def check_coverage(source: xr.DataArray, derived: xr.DataArray, name: str) -> int:
+    """派生レイヤの有効ピクセル数を入力と突き合わせる（NaN汚染の再発防止）。
+
+    「入力に値があるのに出力が NaN」のピクセル数を返す。0 が正常。
+    CI ログに毎回出し、閾値超過は WARNING で目立たせる。
+    """
+    src_ok = np.isfinite(source.values)
+    lost = int(np.sum(src_ok & ~np.isfinite(derived.values)))
+    total = int(src_ok.sum())
+    if lost > 0:
+        log.warning(
+            "%s: 入力に値がある %d ピクセル中 %d (%.1f%%) が出力で欠損しています。"
+            "カーネル処理による NaN 伝播を疑ってください",
+            name, total, lost, lost / total * 100,
+        )
+    else:
+        log.info("%s: 有効ピクセル網羅性 OK (%d/%d)", name, total - lost, total)
+    return lost

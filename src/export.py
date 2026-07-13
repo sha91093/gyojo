@@ -148,8 +148,10 @@ def export_all(
     # --- フロント強度 ---
     if front is not None:
         write_cog(front, latest / "front.tif")
+        # errors は SST の analysis_error を流用する。沿岸SSTの信頼度が低い以上、
+        # そこから微分したフロントの信頼度はさらに低いため、同じ基準で薄く表示する
         front_payload = write_values_json(
-            front, latest / "front_values.json", ndigits=3
+            front, latest / "front_values.json", errors=err, ndigits=3
         )
         fcfg = cfg.get("front", {})
         pct = float(fcfg.get("vmax_percentile", 98))
@@ -165,6 +167,7 @@ def export_all(
             "values": "front_values.json",
             "vmin": 0.0,
             "vmax": round(fvmax, 3),
+            "error_threshold": float(cfg["sst"]["confidence"]["error_threshold_c"]),
             "stats": front_payload["stats"],
         }
         written += ["front.tif", "front_values.json"]

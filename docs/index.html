@@ -202,6 +202,10 @@
     const f = x - i;
     return stops[i].map((c, k) => Math.round(c + (stops[i + 1][k] - c) * f));
   }
+  // TODO: カットオフ(t<0.08)は vmax に対する相対値のため、フロントが弱い日
+  // （vmax が vmax_floor=0.1 に張り付く日）には意味のある弱フロントを消しうる。
+  // 実データが数日たまったら、絶対閾値（例: 0.02 ℃/km 未満は非表示）への
+  // 変更を検討する
   function frontAlpha(t) { return t < 0.08 ? 0 : Math.min(0.92, 0.25 + t * 0.75); }
 
   const CMAPS = {
@@ -288,7 +292,7 @@
     $("legend-max").textContent = fmt(vmax);
     if (activeLayer === "front") {
       $("legend-title").textContent = "フロント強度 (℃/km)";
-      $("legend-note").textContent = "水温の境目の強さ。帯状に強い場所が「潮目」の候補";
+      $("legend-note").textContent = "水温の境目の強さ。帯状に強い場所が「潮目」の候補。薄い表示＝推定誤差が大きい海域（沿岸は参考値）";
     } else {
       $("legend-title").textContent = "海面水温 (℃)";
       $("legend-note").textContent = "薄い表示＝推定誤差が大きい海域（主に沿岸・湾内は参考値）";
@@ -298,13 +302,26 @@
     }
   }
 
+  // 「観測日の古さ」と「パイプラインの故障」は別物。
+  // MUR は公開まで1〜2日のラグがあり、観測日が2〜3日前なのは正常。
+  // 故障検知は meta.json の generated_at（Actions が回ったか）で行う
   function updateInfo(layerMeta, isLatest) {
-    $("obs-date").innerHTML = "観測日: <strong>" + layerMeta.date + "</strong>";
+    const obsAgeDays = Math.floor((Date.now() - new Date(layerMeta.date + "T09:00:00Z")) / 86400000);
+    let label = "観測日: <strong>" + layerMeta.date + "</strong>";
+    if (isLatest && obsAgeDays >= 0) {
+      // 5日以上の遅延は取得側の異常の可能性があるため注意色にする
+      const style = obsAgeDays >= 5 ? ' style="color:#c62828;font-weight:700"' : "";
+      label += "<span" + style + ">（" + obsAgeDays + "日前）</span>";
+    }
+    $("obs-date").innerHTML = label;
     $("past-badge").style.display = isLatest ? "none" : "inline-block";
+  }
+
+  function updatePipelineBanner(latestGeneratedAt) {
     const banner = $("stale-banner");
-    const ageDays = Math.floor((Date.now() - new Date(layerMeta.date + "T09:00:00Z")) / 86400000);
-    if (isLatest && ageDays >= 3) {
-      banner.textContent = "⚠ データが " + ageDays + " 日前から更新されていません。自動更新が壊れている可能性があります。この水温を今日の海況と思わないでください。";
+    const ageDays = Math.floor((Date.now() - new Date(latestGeneratedAt)) / 86400000);
+    if (ageDays >= 2) {
+      banner.textContent = "⚠ 自動更新が " + ageDays + " 日間実行されていません。GitHub Actions の失敗を確認してください。表示中のデータは古い可能性があります。";
       banner.style.display = "block";
     } else {
       banner.style.display = "none";
@@ -346,6 +363,7 @@
   if (!meta) return;
   latestDate = meta.layers.sst.date;
   rangeMode = meta.layers.sst.range_mode === "fixed" ? "fixed" : "auto";
+  updatePipelineBanner(latestMeta.generated_at);
 
   // ---- オーバーレイの描画・差し替え ----
   async function refreshOverlay() {

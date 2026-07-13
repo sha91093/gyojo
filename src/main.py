@@ -45,6 +45,9 @@ def main(argv: list[str] | None = None) -> int:
     err = process.clip_bbox(err_buf, bbox) if err_buf is not None else None
     front = process.clip_bbox(front_buf, bbox)
 
+    # 派生レイヤの欠損チェック（岸沿いの NaN 伝播などの再発防止）
+    process.check_coverage(sst, front, "front")
+
     export.export_all(
         sst=sst, err=err, front=front,
         date=result.date, source_url=result.source_url, cfg=cfg,
