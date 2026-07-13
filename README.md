@@ -71,7 +71,7 @@ URL は常に固定なので、一度プロジェクトを作れば開くたび�
 - MUR は夜間観測主体の foundation SST のため、日中の実測水温と数度ずれることがある。
   **絶対値ではなく空間分布・勾配（フロント）を見る道具**として使うこと。
 - 本ツールは漁場を保証するものではない。出航判断は利用者の責任で行うこと。
-- 参考リンク: [大分県 海況・魚群速報](https://www.pref.oita.jp/soshiki/15090/beppusokuhou.html)（PDF/画像のため自動取り込みはしない）
+- 参考リンク: [大分県 海況・魚群速報](https://www.pref.oita.jp/site/nourinsuisan/beppusokuhou.html)（PDF/画像のため自動取り込みはしない）
 
 ## 今後のフェーズ
 
