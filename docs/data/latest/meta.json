@@ -3,7 +3,7 @@
     "sst": {
       "date": "2026-07-11",
       "source": "MUR SST v4.1 (NASA JPL PO.DAAC / NOAA CoastWatch ERDDAP)",
-      "source_url": "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.nc?analysed_sst[(2026-07-11T09:00:00Z):(2026-07-11T09:00:00Z)][(33.2):(33.9)][(131.4):(132.4)]",
+      "source_url": "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.nc?analysed_sst[(2026-07-11T09:00:00Z):(2026-07-11T09:00:00Z)][(32.85):(34.25)][(131.05):(132.75)],analysis_error[(2026-07-11T09:00:00Z):(2026-07-11T09:00:00Z)][(32.85):(34.25)][(131.05):(132.75)]",
       "variable": "analysed_sst",
       "units": "℃",
       "cog": "sst.tif",
@@ -11,29 +11,45 @@
       "range_mode": "auto",
       "auto_range": [
         23.0,
-        26.5
+        27.0
       ],
       "fixed_range": [
         20.0,
         30.0
       ],
       "vmin": 23.0,
-      "vmax": 26.5,
+      "vmax": 27.0,
       "error_threshold": 0.5,
       "stats": {
         "min": 23.33,
-        "max": 26.69,
-        "mean": 24.26,
-        "p2": 23.42,
-        "p98": 25.82
+        "max": 26.83,
+        "mean": 24.61,
+        "p2": 23.46,
+        "p98": 26.65
+      }
+    },
+    "front": {
+      "date": "2026-07-11",
+      "source": "MUR SST から算出（Sobel 勾配, ℃/km, cos(lat) 補正済み）",
+      "units": "℃/km",
+      "cog": "front.tif",
+      "values": "front_values.json",
+      "vmin": 0.0,
+      "vmax": 0.125,
+      "stats": {
+        "min": 0.001,
+        "max": 0.21,
+        "mean": 0.052,
+        "p2": 0.009,
+        "p98": 0.125
       }
     }
   },
   "bbox": [
-    131.4,
-    33.2,
-    132.4,
-    33.9
+    131.2,
+    33.0,
+    132.6,
+    34.1
   ],
-  "generated_at": "2026-07-13T13:46:32+00:00"
+  "generated_at": "2026-07-13T22:41:43+00:00"
 }
