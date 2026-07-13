@@ -27,10 +27,11 @@
   }
   #info-panel { top: 10px; left: 10px; }
   #info-panel h1 { font-size: 15px; margin: 0 0 4px; }
+  #obs-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   #obs-date { font-size: 13px; color: var(--muted); }
   #obs-date strong { color: var(--text); }
 
-  #date-nav { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  #date-nav { display: flex; align-items: center; gap: 6px; }
   #date-nav button {
     border: 1px solid #c8d2de; background: #fff; color: var(--text);
     border-radius: 6px; font-size: 13px; padding: 4px 10px; cursor: pointer;
@@ -69,14 +70,23 @@
   /* ズームボタン（右下）が縮尺・帰属表示と重ならないよう少し持ち上げる */
   .maplibregl-ctrl-bottom-right { margin-bottom: 22px; }
 
-  @media (max-width: 640px) {
-    #notes-panel { max-width: min(240px, calc(100vw - 24px)); }
-    #legend-panel { max-width: 230px; }
-  }
-  /* 横持ちスマホなど高さが低い画面では注意事項を凡例側に寄せない */
-  @media (max-height: 520px) {
-    .panel { padding: 8px 10px; }
-    #info-panel h1 { font-size: 13px; }
+  /* スマホではパネルを大幅にコンパクト化する */
+  @media (max-width: 640px), (max-height: 520px) {
+    .panel { padding: 6px 9px; border-radius: 8px; }
+    #info-panel h1 { font-size: 11px; font-weight: 600; color: var(--muted); margin: 0 0 2px; }
+    #obs-date { font-size: 12px; }
+    #date-nav button { font-size: 12px; padding: 2px 8px; }
+    #past-badge { font-size: 10px; padding: 2px 5px; }
+    #stale-warning { font-size: 11px; padding: 4px 6px; margin-top: 4px; }
+
+    #legend-panel { max-width: 200px; bottom: 24px; }
+    #legend-title { font-size: 10px; margin-bottom: 4px; }
+    #legend-bar { height: 8px; }
+    #legend-labels { font-size: 10px; }
+    #opacity-row { font-size: 10px; margin-top: 5px; }
+
+    #notes-panel { font-size: 11px; max-width: min(240px, calc(100vw - 24px)); }
+    #notes-panel summary { font-size: 12px; }
   }
 </style>
 </head>
@@ -85,12 +95,14 @@
 
 <div class="panel" id="info-panel">
   <h1>杵築市沖 沿岸漁場支援マップ</h1>
-  <div id="obs-date">読み込み中…</div>
-  <div id="date-nav" hidden>
-    <button id="prev-day" title="前の日">◀</button>
-    <button id="next-day" title="次の日">▶</button>
-    <button id="to-latest">最新へ</button>
-    <span id="past-badge">過去データ</span>
+  <div id="obs-row">
+    <div id="obs-date">読み込み中…</div>
+    <div id="date-nav" hidden>
+      <button id="prev-day" title="前の日">◀</button>
+      <button id="next-day" title="次の日">▶</button>
+      <button id="to-latest">最新へ</button>
+      <span id="past-badge">過去データ</span>
+    </div>
   </div>
   <div id="stale-warning"></div>
 </div>
@@ -206,7 +218,7 @@
   }
 
   function updateInfo(layer, isLatest) {
-    $("obs-date").innerHTML = "海面水温 観測日: <strong>" + layer.date + "</strong>";
+    $("obs-date").innerHTML = "観測日: <strong>" + layer.date + "</strong>";
     $("past-badge").style.display = isLatest ? "none" : "inline-block";
     // 鮮度警告は最新表示のときだけ
     const warn = $("stale-warning");
