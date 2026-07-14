@@ -83,6 +83,26 @@ def _try_fetch_chla(cfg: dict, work_dir: Path) -> ChlaBundle:
     return bundle
 
 
+def _parse_date(text: str | None):
+    """観測日の文字列を date に変換する。空欄は None。
+
+    区切りは - / _ . 空白のどれでも受け付け、間違えやすい入力を許容する。
+    不正な場合は分かりやすいメッセージで SystemExit する。
+    """
+    import datetime as _dt
+    import re
+
+    if not text or not text.strip():
+        return None
+    norm = re.sub(r"[/_.\s]", "-", text.strip())
+    try:
+        return _dt.date.fromisoformat(norm)
+    except ValueError:
+        raise SystemExit(
+            f"--date の形式が不正です: {text!r}。YYYY-MM-DD で指定してください（例 2026-07-12）"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="沿岸漁場支援マップ データ更新")
     parser.add_argument("--config", default="config.yaml", help="設定ファイルのパス")
@@ -90,8 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--date", default=None,
                         help="過去日を単発取得（YYYY-MM-DD）。検証・穴埋め用（修正3-2）")
     args = parser.parse_args(argv)
-    import datetime as _dt
-    target_date = _dt.date.fromisoformat(args.date) if args.date else None
+    target_date = _parse_date(args.date)
 
     logging.basicConfig(
         level=logging.INFO,
