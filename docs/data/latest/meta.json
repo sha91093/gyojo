@@ -44,6 +44,25 @@
         "p2": 0.009,
         "p98": 0.123
       }
+    },
+    "chla": {
+      "date": "2026-07-12",
+      "source": "Copernicus Marine gap-free L4 (OCEANCOLOUR_GLO_BGC_L4_NRT_009_102)",
+      "variable": "CHL",
+      "units": "mg/m³",
+      "cog": "chla.tif",
+      "values": "chla_values.json",
+      "scale": "log",
+      "colormap": "algae",
+      "vmin": 0.358,
+      "vmax": 4.03,
+      "stats": {
+        "min": 0.226,
+        "max": 6.871,
+        "mean": 1.392,
+        "p2": 0.358,
+        "p98": 4.03
+      }
     }
   },
   "bbox": [
@@ -52,5 +71,5 @@
     132.6,
     34.1
   ],
-  "generated_at": "2026-07-14T00:34:54+00:00"
+  "generated_at": "2026-07-14T04:41:03+00:00"
 }
