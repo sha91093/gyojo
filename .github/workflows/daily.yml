@@ -32,23 +32,20 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # Copernicus Marine のメタデータ/認証キャッシュを run 間で保持し、
-      # 外部エンドポイントへの接続回数を減らす（修正3）
-      - name: Cache copernicusmarine metadata
-        uses: actions/cache@v4
-        with:
-          path: ~/.copernicusmarine
-          key: cmems-meta-${{ runner.os }}-v1
+      # 注: copernicusmarine v2.4.1 はメタデータ(clientsConfigV1.json 等)を
+      # ~/.copernicusmarine に永続キャッシュしないため actions/cache は効かない
+      # （実際に「保存対象なし」警告が出た）。接続の粘りは下の env で調整する
 
       - name: Fetch and process satellite data
         env:
           # クロロフィル（Copernicus Marine）用。未設定ならSSTのみで続行する
           CMEMS_USERNAME: ${{ secrets.CMEMS_USERNAME }}
           CMEMS_PASSWORD: ${{ secrets.CMEMS_PASSWORD }}
-          # 外部不調時に1呼び出しが5分溶けるのを防ぐ（接続15秒/リトライ1回）。
-          # これ自体でも安全側だが、取得コードにもハードタイムアウトを併設している
-          COPERNICUSMARINE_HTTPS_TIMEOUT: "15"
-          COPERNICUSMARINE_HTTPS_RETRIES: "1"
+          # CMEMS のメタデータ配信(s3.waw3-1.cloudferro.com)は GitHub から
+          # 届かないことがある。遅いだけの時に拾えるよう接続を少し粘る
+          # （取得コード側の fetch_timeout_sec と 30分ジョブ上限で暴走は防ぐ）
+          COPERNICUSMARINE_HTTPS_TIMEOUT: "30"
+          COPERNICUSMARINE_HTTPS_RETRIES: "2"
         run: python -m src.main
 
       - name: Commit and push updated data

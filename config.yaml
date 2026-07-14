@@ -82,8 +82,9 @@ chla:
   # 最新日は open_dataset から特定するので総当たりの遡りは不要。
   # 念のため最新日から数日だけ空データ回避で降りる小さな保険
   lookback_days: 3
-  # この秒数を超えたら取得を諦め、SST/フロントだけ公開する（外部障害対策）
-  fetch_timeout_sec: 120
+  # この秒数を超えたら取得を諦め、SST/フロントだけ公開する（外部障害対策）。
+  # 遅いだけのエンドポイントを拾えるよう、接続リトライ分の余裕を持たせる
+  fetch_timeout_sec: 200
   # 認証情報を渡す環境変数名（GitHub Secrets と同名。値はコミットしない）
   username_env: CMEMS_USERNAME
   password_env: CMEMS_PASSWORD
@@ -109,7 +110,7 @@ chla_hires:
   gradient_variable: CHL_gradient
   # 最新日から降りる小さな保険（総当たりはしない）
   lookback_days: 3
-  # この秒数を超えたら諦める。高解像度は必須ではない
+  # この秒数を超えたら諦める。高解像度は必須ではないので広域より短め
   fetch_timeout_sec: 120
   # 出力 JSON が大きくなりすぎたときの間引き（1=間引きなし）。
   # まず素直に出してサイズを実測し、必要なら 2 にする方針
