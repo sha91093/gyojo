@@ -94,6 +94,22 @@ chla:
     vmin: 0.05
     vmax: 20.0
 
+# 高解像度クロロフィル（L3 OLCI 300m・晴天時のみ / レビュー課題1・2）
+# SST の二層構成（広域MUR + 高解像度）と同じ思想。雲があると欠測する。
+# この L3 の被覆状況を使い、広域 L4 の「補間で埋めた箇所」を判定する（課題2）
+chla_hires:
+  enabled: true
+  # 製品: OCEANCOLOUR_GLO_BGC_L3_NRT_009_101（OLCI 300m 日次）
+  dataset_id: cmems_obs-oc_glo_bgc-plankton_nrt_l3-olci-300m_P1D
+  variable: CHL               # クロロフィルa濃度 (mg/m^3)
+  # フロント同様の勾配。L3 に同梱されていれば取得（無ければスキップ）
+  gradient_variable: CHL_gradient
+  # 高解像度は欠測しやすいため広域よりさらに長めに遡る
+  lookback_days: 5
+  # 出力 JSON が大きくなりすぎたときの間引き（1=間引きなし）。
+  # まず素直に出してサイズを実測し、必要なら 2 にする方針
+  stride: 1
+
 output:
   docs_dir: docs
   data_dir: docs/data

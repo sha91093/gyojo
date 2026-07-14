@@ -43,6 +43,8 @@
     display: none; font-size: 11px; font-weight: 700; color: #8a5300;
     background: #fff3d6; border-radius: 5px; padding: 3px 7px;
   }
+  .date-warn { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 700;
+    color: #a3271d; background: #fdecea; border-radius: 5px; padding: 2px 6px; }
 
   /* レイヤ・レンジの切替チップ */
   .chip-row { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; align-items: center; }
@@ -133,6 +135,8 @@
     <button class="chip active" data-layer="sst">水温</button>
     <button class="chip" data-layer="front">フロント</button>
     <button class="chip" data-layer="chla">クロロフィル</button>
+    <button class="chip" data-layer="chla_hires">高解像</button>
+    <button class="chip" data-layer="chla_grad">Chl勾配</button>
   </div>
   <div class="chip-row" id="range-row">
     <span class="chip-label">色:</span>
@@ -160,7 +164,9 @@
     <li><strong>海面をタップすると、その地点の数値が出ます。</strong></li>
     <li>色の切替: 「フロントを探す」はその日の水温幅でコントラスト最大化、「変化を追う」は季節固定の色なので昨日との比較ができます。</li>
     <li>「フロント」レイヤは水温の境目の強さ (℃/km)。<strong>暖水と冷水の境目には回遊魚が集まりやすい</strong>とされます。</li>
-    <li>「クロロフィル」レイヤは植物プランクトンの多さ (mg/m³)。<strong>濃い場所の縁と水温フロントが重なる所が好漁場の候補</strong>という見方ができます。雲の欠測は補間で埋めた値です。</li>
+    <li>「クロロフィル」レイヤは植物プランクトンの多さ (mg/m³)。<strong>濃い場所の縁と水温フロントが重なる所が好漁場の候補</strong>という見方ができます。</li>
+    <li>クロロフィルは2種類:「クロロフィル」(広域4km・毎日)と「高解像」(300m・晴天時のみ)。広域の<strong>薄い部分は雲を補間で埋めた値</strong>で、実測カバー率を凡例に表示します。</li>
+    <li>レイヤの観測日が水温と異なる場合は観測日の横に警告を出します（別日のデータを重ねている状態）。</li>
     <li><strong>岸から2〜3km以内は陸地の熱の影響を受けるため参考値です。</strong>特に閉鎖性水域（別府湾奥・守江湾内）の値は信頼性が低くなります。薄く表示されている部分は推定誤差が大きい海域です。</li>
     <li>◀ ▶ ボタンで過去のデータ（約90日分）を見られます。</li>
     <li>PC の QGIS では <code>data/latest/sst.tif</code> / <code>front.tif</code>（COG）を HTTP レイヤとして直接開けます。</li>
@@ -221,9 +227,11 @@
   }
 
   const CMAPS = {
-    sst:   { color: turbo,      alpha: () => 0.9,  scale: "linear" },
-    front: { color: frontColor, alpha: frontAlpha, scale: "linear" },
-    chla:  { color: chlaColor,  alpha: () => 0.85, scale: "log" }
+    sst:        { color: turbo,      alpha: () => 0.9,  scale: "linear" },
+    front:      { color: frontColor, alpha: frontAlpha, scale: "linear" },
+    chla:       { color: chlaColor,  alpha: () => 0.85, scale: "log" },
+    chla_hires: { color: chlaColor,  alpha: () => 0.85, scale: "log" },
+    chla_grad:  { color: frontColor, alpha: frontAlpha, scale: "linear" }
   };
 
   // 値 → 0..1 の正規化位置。対数スケールにも対応
@@ -268,7 +276,9 @@
     return [layerMeta.vmin, layerMeta.vmax];
   }
 
-  const LAYER_UNIT = { sst: "℃", front: "℃/km", chla: "mg/m³" };
+  const LAYER_UNIT = { sst: "℃", front: "℃/km", chla: "mg/m³", chla_hires: "mg/m³", chla_grad: "mg/m³/km" };
+  // レイヤ名（チップ・凡例に使う）
+  const LAYER_NAME = { sst: "水温", front: "フロント", chla: "クロロフィル", chla_hires: "クロロフィル(高解像)", chla_grad: "クロロフィル勾配" };
 
   // ---- Canvas 描画 → dataURL ----
   function renderDataURL(grid, layerMeta) {
@@ -287,9 +297,13 @@
       const t = normPos(v, vmin, vmax, cmap.scale);
       const [r, g, b] = cmap.color(t);
       let a = cmap.alpha(t);
-      // 推定誤差が大きいピクセルは信頼度低として薄くする
+      // 推定誤差が大きいピクセルは信頼度低として薄くする（SST/フロント）
       if (errTh && grid.errors && grid.errors[i] !== null && grid.errors[i] > errTh) {
         a *= 0.35;
+      }
+      // クロロフィル広域: 雲で欠測し補間で埋めた箇所も薄くする（課題2）
+      if (grid.interpolated && grid.interpolated[i]) {
+        a *= 0.4;
       }
       px[o] = r; px[o + 1] = g; px[o + 2] = b; px[o + 3] = Math.round(a * 255);
     }
@@ -322,9 +336,22 @@
     if (activeLayer === "front") {
       $("legend-title").textContent = "フロント強度 (℃/km)";
       $("legend-note").textContent = "水温の境目の強さ。帯状に強い場所が「潮目」の候補。薄い表示＝推定誤差が大きい海域（沿岸は参考値）";
-    } else if (activeLayer === "chla") {
-      $("legend-title").textContent = "クロロフィルa (mg/m³・対数)";
-      $("legend-note").textContent = "植物プランクトンの多さの目安。濃い場所の縁と水温フロントが重なると好漁場候補。雲を補間で埋めた値です";
+    } else if (activeLayer === "chla_grad") {
+      $("legend-title").textContent = "クロロフィル勾配 (mg/m³/km)";
+      $("legend-note").textContent = "クロロフィルの濃淡の境目。水温フロントと重なる場所が好漁場候補（晴天時のみ・雲域は欠測）";
+    } else if (activeLayer === "chla" || activeLayer === "chla_hires") {
+      const hires = activeLayer === "chla_hires";
+      $("legend-title").textContent = "クロロフィルa (mg/m³・対数)" + (hires ? " 高解像度" : "");
+      let note = "植物プランクトンの多さの目安。濃い場所の縁と水温フロントが重なると好漁場候補。";
+      if (hires) {
+        note += "300m解像度・晴天時のみ（雲域は欠測）";
+      } else {
+        const cov = layerMeta.measured_coverage_pct;
+        note += (cov != null)
+          ? "薄い部分＝雲で欠測し補間で埋めた値（この日の実測は約" + cov + "%）"
+          : "雲を補間で埋めた値を含みます";
+      }
+      $("legend-note").textContent = note;
     } else {
       $("legend-title").textContent = "海面水温 (℃)";
       $("legend-note").textContent = "薄い表示＝推定誤差が大きい海域（主に沿岸・湾内は参考値）";
@@ -344,6 +371,12 @@
       // 5日以上の遅延は取得側の異常の可能性があるため注意色にする
       const style = obsAgeDays >= 5 ? ' style="color:#c62828;font-weight:700"' : "";
       label += "<span" + style + ">（" + obsAgeDays + "日前）</span>";
+    }
+    // 課題3: 表示中レイヤの観測日が水温とずれている場合は明示する。
+    // 「フロントとクロロフィルの重なり」を見るとき別日を重ねている事実を隠さない
+    const sstDate = meta.layers.sst && meta.layers.sst.date;
+    if (sstDate && layerMeta.date !== sstDate) {
+      label += '<span class="date-warn">⚠ 水温は ' + sstDate + "（別日）</span>";
     }
     $("obs-date").innerHTML = label;
     $("past-badge").style.display = isLatest ? "none" : "inline-block";

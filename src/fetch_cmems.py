@@ -35,6 +35,7 @@ class FetchResult:
 
 
 def _credentials(cfg: dict) -> tuple[str, str]:
+    # 認証情報のキー名は広域 chla セクションに集約している
     c = cfg["chla"]
     user = os.environ.get(c["username_env"], "").strip()
     pw = os.environ.get(c["password_env"], "").strip()
@@ -45,28 +46,29 @@ def _credentials(cfg: dict) -> tuple[str, str]:
     return user, pw
 
 
-def fetch_latest(cfg: dict, out_dir: Path) -> FetchResult:
-    """直近で取得可能なクロロフィルを out_dir にダウンロードする。
-
-    認証情報が無い場合は CredentialsMissing、全日取得失敗で RuntimeError。
-    """
+def _fetch(cfg: dict, layer_cfg: dict, out_dir: Path, prefix: str) -> FetchResult:
+    """指定データセットを bbox+バッファ・日次で遡り取得する共通処理。"""
     import copernicusmarine
 
-    c = cfg["chla"]
     user, pw = _credentials(cfg)
     out_dir.mkdir(parents=True, exist_ok=True)
     b = fetch_mur.buffered_bbox(cfg)  # SST と同じバッファ付き範囲
 
+    variables = [layer_cfg["variable"]]
+    grad = layer_cfg.get("gradient_variable")
+    if grad:
+        variables.append(grad)
+
     today = dt.datetime.now(dt.timezone.utc).date()
-    lookback = int(c["lookback_days"])
+    lookback = int(layer_cfg["lookback_days"])
     errors: list[str] = []
     for delta in range(lookback + 1):
         date = today - dt.timedelta(days=delta)
-        fname = f"chla_{date.isoformat()}.nc"
+        fname = f"{prefix}_{date.isoformat()}.nc"
         try:
             copernicusmarine.subset(
-                dataset_id=c["dataset_id"],
-                variables=[c["variable"]],
+                dataset_id=layer_cfg["dataset_id"],
+                variables=variables,
                 minimum_longitude=b["min_lon"],
                 maximum_longitude=b["max_lon"],
                 minimum_latitude=b["min_lat"],
@@ -82,14 +84,24 @@ def fetch_latest(cfg: dict, out_dir: Path) -> FetchResult:
             )
             path = out_dir / fname
             if path.exists() and path.stat().st_size > 0:
-                log.info("クロロフィル取得成功: %s (%d bytes)", fname, path.stat().st_size)
-                return FetchResult(path=path, date=date, source=c["dataset_id"])
+                log.info("%s 取得成功: %s (%d bytes)", prefix, fname, path.stat().st_size)
+                return FetchResult(path=path, date=date, source=layer_cfg["dataset_id"])
             errors.append(f"{date}: 空ファイル")
-        except Exception as exc:  # 未公開日は例外になる。遡って再試行する
+        except Exception as exc:  # 未公開日・全面欠測日は例外になる。遡って再試行する
             errors.append(f"{date}: {type(exc).__name__}")
-            log.info("%s のクロロフィルは取得できず（%s）", date, type(exc).__name__)
+            log.info("%s %s は取得できず（%s）", date, prefix, type(exc).__name__)
 
     raise RuntimeError(
-        f"直近 {lookback + 1} 日分のクロロフィルをいずれも取得できませんでした: "
+        f"直近 {lookback + 1} 日分の {prefix} をいずれも取得できませんでした: "
         + "; ".join(errors[:5])
     )
+
+
+def fetch_latest(cfg: dict, out_dir: Path) -> FetchResult:
+    """広域クロロフィル（gap-free L4 4km）を取得する。"""
+    return _fetch(cfg, cfg["chla"], out_dir, "chla")
+
+
+def fetch_hires(cfg: dict, out_dir: Path) -> FetchResult:
+    """高解像度クロロフィル（L3 OLCI 300m・晴天時のみ）を取得する。"""
+    return _fetch(cfg, cfg["chla_hires"], out_dir, "chla_hires")

@@ -109,35 +109,91 @@ def load_dataset(nc_path, cfg: dict) -> tuple[xr.DataArray, xr.DataArray | None]
     return sst, err
 
 
-def load_chla(nc_path, cfg: dict) -> xr.DataArray:
-    """Copernicus Marine の NetCDF からクロロフィルを読む。
-
-    バッファ付きの取得範囲のまま返す（クリップは呼び出し側）。
-    値は mg/m^3。負値や 0 以下は対数表示で扱えないため NaN にする。
-    """
-    var = cfg["chla"]["variable"]
+def _read_var(nc_path, var: str) -> xr.DataArray:
+    """NetCDF から 1 変数を読み、lat/lon 正規化・表層抽出したものを返す。"""
     with xr.open_dataset(nc_path, mask_and_scale=True) as ds:
         if var not in ds:
             raise KeyError(
                 f"変数 {var} が見つかりません。存在する変数: {list(ds.data_vars)}"
             )
-        chla = ds[var].load()
-
-    # 深さ次元があれば表層を取る
+        da = ds[var].load()
     for dim in ("depth", "elevation"):
-        if dim in chla.dims:
-            chla = chla.isel({dim: 0}, drop=True)
-    chla = _normalize(chla)
+        if dim in da.dims:
+            da = da.isel({dim: 0}, drop=True)
+    return _normalize(da)
+
+
+def load_chla(nc_path, cfg: dict, layer_key: str = "chla") -> xr.DataArray:
+    """Copernicus Marine の NetCDF からクロロフィルを読む。
+
+    バッファ付きの取得範囲のまま返す（クリップは呼び出し側）。
+    値は mg/m^3。負値や 0 以下は対数表示で扱えないため NaN にする。
+    """
+    var = cfg[layer_key]["variable"]
+    chla = _read_var(nc_path, var)
     chla = chla.where(chla > 0)  # 対数表示のため 0 以下を除外
     chla = chla.assign_attrs(units="mg m-3")
 
     finite = chla.values[np.isfinite(chla.values)]
     if finite.size:
         log.info(
-            "クロロフィル読み込み: %d x %d px, %.3f〜%.3f mg/m^3",
-            chla.sizes["lon"], chla.sizes["lat"], float(finite.min()), float(finite.max()),
+            "%s 読み込み: %d x %d px, %.3f〜%.3f mg/m^3",
+            layer_key, chla.sizes["lon"], chla.sizes["lat"],
+            float(finite.min()), float(finite.max()),
         )
     return chla
+
+
+def load_chla_gradient(nc_path, cfg: dict) -> xr.DataArray | None:
+    """L3 に含まれるクロロフィル勾配 (CHL_gradient) を読む。無ければ None。"""
+    var = cfg["chla_hires"].get("gradient_variable")
+    if not var:
+        return None
+    try:
+        grad = _read_var(nc_path, var).where(lambda x: np.isfinite(x))
+        return grad.assign_attrs(units="mg m-3 km-1")
+    except KeyError:
+        log.warning("%s が L3 に無いためクロロフィル勾配はスキップします", var)
+        return None
+
+
+def measured_mask_on(broad: xr.DataArray, hires: xr.DataArray) -> np.ndarray:
+    """広域(L4)グリッドの各セルが高解像度(L3)で実測されているかの真偽配列。
+
+    L3 は雲があると欠測するので「L3 に値がある = その日実測された」。
+    L4 gap-free はその欠測を補間で埋めている。各 L4 セルの範囲に
+    有効な L3 ピクセルが1つでもあれば実測(True)、無ければ補間(False)とみなす。
+
+    戻り値は broad と同じ形状の bool 配列（行0=北端）。
+    """
+    hlat = hires["lat"].values
+    hlon = hires["lon"].values
+    hvalid = np.isfinite(hires.values)
+    blat = broad["lat"].values
+    blon = broad["lon"].values
+
+    # L4 セル境界（緯度は降順前提）
+    dlat = abs(float(blat[1] - blat[0])) / 2 if blat.size > 1 else 0.02
+    dlon = abs(float(blon[1] - blon[0])) / 2 if blon.size > 1 else 0.02
+
+    # 各 L3 ピクセルがどの L4 セルに入るかを索引化して集計
+    measured = np.zeros((blat.size, blon.size), dtype=bool)
+    lat_edges = np.concatenate(([blat[0] + dlat], blat - dlat))  # 降順の外縁
+    lon_edges = np.concatenate(([blon[0] - dlon], blon + dlon))  # 昇順の外縁
+    # 緯度は降順なので反転して digitize する
+    row_idx = np.searchsorted(-lat_edges, -hlat) - 1
+    col_idx = np.searchsorted(lon_edges, hlon) - 1
+
+    for r_h in range(hlat.size):
+        rr = row_idx[r_h]
+        if rr < 0 or rr >= blat.size:
+            continue
+        valid_row = hvalid[r_h]
+        cols = col_idx[valid_row]
+        cols = cols[(cols >= 0) & (cols < blon.size)]
+        if cols.size:
+            measured[rr, cols] = True
+    return measured
 
 
 def compute_front(sst: xr.DataArray) -> xr.DataArray:
