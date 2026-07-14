@@ -97,24 +97,38 @@ def fetch_latest(cfg: dict, out_dir: Path, target_date: dt.date | None = None) -
             start = min(start, latest)
             log.info("ERDDAP の最新データ日: %s", latest)
         lookback = int(cfg["sst"]["lookback_days"])
+    import time
+
     errors: list[str] = []
     for delta in range(lookback + 1):
         date = start - dt.timedelta(days=delta)
         url = _griddap_url(cfg, date)
         log.info("取得を試行: %s", date)
-        try:
-            r = requests.get(url, timeout=REQUEST_TIMEOUT)
-            is_netcdf = r.content[:3] == b"CDF" or r.content[:4] == b"\x89HDF"
-            if r.status_code == 200 and is_netcdf:
-                path = out_dir / f"mur_sst_{date.isoformat()}.nc"
-                path.write_bytes(r.content)
-                log.info("取得成功: %s (%d bytes)", path.name, len(r.content))
-                return FetchResult(path=path, date=date, source_url=url)
-            errors.append(f"{date}: HTTP {r.status_code}")
-            log.info("%s は未公開または取得失敗 (HTTP %d)", date, r.status_code)
-        except requests.RequestException as exc:
-            errors.append(f"{date}: {exc}")
-            log.warning("%s の取得でエラー: %s", date, exc)
+        # ERDDAP の 5xx は一時的なことが多いので指数バックオフでリトライする
+        for attempt in range(3):
+            try:
+                r = requests.get(url, timeout=REQUEST_TIMEOUT)
+                is_netcdf = r.content[:3] == b"CDF" or r.content[:4] == b"\x89HDF"
+                if r.status_code == 200 and is_netcdf:
+                    path = out_dir / f"mur_sst_{date.isoformat()}.nc"
+                    path.write_bytes(r.content)
+                    log.info("取得成功: %s (%d bytes)", path.name, len(r.content))
+                    return FetchResult(path=path, date=date, source_url=url)
+                if r.status_code >= 500 and attempt < 2:
+                    wait = 3 * (attempt + 1)
+                    log.info("%s は HTTP %d（一時エラー）。%d秒後に再試行", date, r.status_code, wait)
+                    time.sleep(wait)
+                    continue
+                errors.append(f"{date}: HTTP {r.status_code}")
+                log.info("%s は未公開または取得失敗 (HTTP %d)", date, r.status_code)
+                break
+            except requests.RequestException as exc:
+                if attempt < 2:
+                    time.sleep(3 * (attempt + 1))
+                    continue
+                errors.append(f"{date}: {exc}")
+                log.warning("%s の取得でエラー: %s", date, exc)
+                break
 
     raise RuntimeError(
         f"直近 {lookback + 1} 日分の MUR SST をいずれも取得できませんでした: "
