@@ -87,7 +87,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="沿岸漁場支援マップ データ更新")
     parser.add_argument("--config", default="config.yaml", help="設定ファイルのパス")
     parser.add_argument("--work-dir", default="work", help="ダウンロード作業ディレクトリ")
+    parser.add_argument("--date", default=None,
+                        help="過去日を単発取得（YYYY-MM-DD）。検証・穴埋め用（修正3-2）")
     args = parser.parse_args(argv)
+    import datetime as _dt
+    target_date = _dt.date.fromisoformat(args.date) if args.date else None
 
     logging.basicConfig(
         level=logging.INFO,
@@ -97,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
     bbox = cfg["bbox"]
 
-    result = fetch_mur.fetch_latest(cfg, Path(args.work_dir))
+    result = fetch_mur.fetch_latest(cfg, Path(args.work_dir), target_date=target_date)
 
     # バッファ付きグリッドのままフロントを計算し、表示範囲へクリップする
     sst_buf, err_buf = process.load_dataset(result.path, cfg)

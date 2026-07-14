@@ -93,6 +93,8 @@ def load_dataset(nc_path, cfg: dict) -> tuple[xr.DataArray, xr.DataArray | None]
         sst = ds[e["variable"]].load()
         err_var = e.get("error_variable")
         err = ds[err_var].load() if err_var and err_var in ds else None
+        an_var = e.get("anomaly_variable")
+        anomaly = ds[an_var].load() if an_var and an_var in ds else None
 
     sst = _to_celsius(_normalize(sst))
     if err is not None:
@@ -101,12 +103,29 @@ def load_dataset(nc_path, cfg: dict) -> tuple[xr.DataArray, xr.DataArray | None]
     else:
         log.warning("推定誤差変数が無いため信頼度表示なしで続行します")
 
+    # 平年偏差の要約（異常日の切り分け用 / 修正3-1）
+    if anomaly is not None:
+        av = _normalize(anomaly).values
+        af = av[np.isfinite(av)]
+        if af.size:
+            log.info(
+                "sst_anomaly: 平均 %+.2f℃ / 空間標準偏差 %.3f℃"
+                "（偏差が一様に大きいならプロダクト側を疑う）",
+                float(af.mean()), float(af.std()),
+            )
+
     log.info(
         "読み込み完了: %d x %d px, SST %.2f〜%.2f ℃",
         sst.sizes["lon"], sst.sizes["lat"],
         float(sst.min(skipna=True)), float(sst.max(skipna=True)),
     )
     return sst, err
+
+
+def spatial_std(da: xr.DataArray) -> float:
+    """有効ピクセルの空間標準偏差。観測が乏しくならされた日は小さくなる。"""
+    v = da.values[np.isfinite(da.values)]
+    return float(v.std()) if v.size else 0.0
 
 
 def _read_var(nc_path, var: str) -> xr.DataArray:

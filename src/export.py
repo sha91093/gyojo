@@ -157,6 +157,13 @@ def export_all(
     write_cog(sst, latest / "sst.tif")
     vmin, vmax = auto_range(sst.values, disp)
 
+    # 日次品質: 空間標準偏差が小さい日は観測が乏しく背景場へ緩んでいる（修正1）
+    std = round(float(np.nanstd(sst.values)), 3)
+    min_std = float(cfg["sst"].get("quality", {}).get("min_spatial_std_c", 0.0))
+    low_variance = std < min_std
+    if low_variance:
+        log.warning("SST 空間標準偏差 %.3f℃ < %.2f: ならされた日と判定（フロント判読不可）", std, min_std)
+
     sst_meta = {
         "date": date.isoformat(),
         "source": "MUR SST v4.1 (NASA JPL PO.DAAC / NOAA CoastWatch ERDDAP)",
@@ -168,10 +175,10 @@ def export_all(
         "range_mode": disp.get("range_mode", "auto"),
         "auto_range": [vmin, vmax],
         "fixed_range": fixed_range_for(date, disp),
-        # 後方互換（旧フロントエンドが参照）
         "vmin": vmin,
         "vmax": vmax,
-        "error_threshold": float(cfg["sst"]["confidence"]["error_threshold_c"]),
+        "spatial_std": std,
+        "low_variance": low_variance,
         "stats": sst_payload["stats"],
     }
 
@@ -202,7 +209,8 @@ def export_all(
             "values": "front_values.json",
             "vmin": 0.0,
             "vmax": round(fvmax, 3),
-            "error_threshold": float(cfg["sst"]["confidence"]["error_threshold_c"]),
+            # ならされた日はフロントが実在しない構造を描くため警告フラグを渡す
+            "low_variance": low_variance,
             "stats": front_payload["stats"],
         }
         written += ["front.tif", "front_values.json"]
@@ -293,6 +301,8 @@ def export_all(
     meta = {
         "layers": layers,
         "bbox": [bbox["min_lon"], bbox["min_lat"], bbox["max_lon"], bbox["max_lat"]],
+        # 海岸線からの距離で沿岸を半透明化する閾値（フロントエンドが JS で距離計算）
+        "coast_buffer_km": float(cfg["sst"]["confidence"].get("coast_buffer_km", 0.0)),
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     }
     (latest / "meta.json").write_text(

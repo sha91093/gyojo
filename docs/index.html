@@ -25,7 +25,17 @@
     background: var(--panel-bg); border-radius: var(--radius); box-shadow: var(--shadow);
     padding: 10px 12px; max-width: min(340px, calc(100vw - 24px));
   }
-  #info-panel { top: 10px; left: 10px; }
+  /* 上部バー: 情報パネルと注意事項を横並び（デスクトップ）/ 縦積み（スマホ）にし、
+     絶対配置どうしの重なりをなくす */
+  #top-bar {
+    position: absolute; z-index: 5; top: 10px; left: 10px; right: 10px;
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+    pointer-events: none;
+  }
+  #top-bar > * { pointer-events: auto; }
+  #top-bar .panel { position: relative; top: auto; left: auto; right: auto; }
+  #info-panel { flex: 0 1 auto; }
+  #notes-panel { flex: 0 0 auto; }
   #info-panel h1 { font-size: 15px; margin: 0 0 4px; }
   #obs-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   #obs-date { font-size: 13px; color: var(--muted); }
@@ -45,6 +55,9 @@
   }
   .date-warn { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 700;
     color: #a3271d; background: #fdecea; border-radius: 5px; padding: 2px 6px; }
+  #quality-warn { margin-top: 7px; padding: 6px 8px; border-radius: 6px;
+    background: #fdecea; color: #a3271d; font-size: 12px; font-weight: 700; line-height: 1.45; }
+  #quality-warn[hidden] { display: none; }
 
   /* レイヤ・レンジの切替チップ */
   .chip-row { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; align-items: center; }
@@ -74,8 +87,8 @@
   #opacity-row { display: flex; align-items: center; gap: 8px; margin-top: 7px; font-size: 11px; color: var(--muted); }
   #opacity-row input { flex: 1; accent-color: var(--accent); }
 
-  #notes-panel { top: 10px; right: 10px; font-size: 12px; }
-  #notes-panel summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+  #notes-panel { font-size: 12px; }
+  #notes-panel summary { cursor: pointer; font-weight: 600; font-size: 13px; white-space: nowrap; }
   #notes-panel ul { margin: 8px 0 4px; padding-left: 18px; }
   #notes-panel li { margin-bottom: 6px; line-height: 1.5; }
   #notes-panel a { color: var(--accent); }
@@ -95,8 +108,12 @@
   /* ズームボタン（右下）が縮尺・帰属表示と重ならないよう少し持ち上げる */
   .maplibregl-ctrl-bottom-right { margin-bottom: 22px; }
 
-  /* スマホではパネルを大幅にコンパクト化する */
+  /* スマホではパネルを大幅にコンパクト化し、上部バーを縦積みにして重なりを防ぐ */
   @media (max-width: 640px), (max-height: 520px) {
+    /* 情報パネルを上、注意事項をその下に積む（横並びの重なりを解消） */
+    #top-bar { flex-direction: column; align-items: stretch; }
+    #notes-panel { align-self: flex-start; }
+
     .panel { padding: 6px 9px; border-radius: 8px; }
     #info-panel h1 { font-size: 11px; font-weight: 600; color: var(--muted); margin: 0 0 2px; }
     #obs-date { font-size: 12px; }
@@ -111,7 +128,7 @@
     #legend-note { font-size: 9px; }
     #opacity-row { font-size: 10px; margin-top: 5px; }
 
-    #notes-panel { font-size: 11px; max-width: min(240px, calc(100vw - 24px)); }
+    #notes-panel { font-size: 11px; max-width: calc(100vw - 20px); }
     #notes-panel summary { font-size: 12px; }
   }
 </style>
@@ -120,6 +137,7 @@
 <div id="map"></div>
 <div id="stale-banner"></div>
 
+<div id="top-bar">
 <div class="panel" id="info-panel">
   <h1>杵築市沖 沿岸漁場支援マップ</h1>
   <div id="obs-row">
@@ -143,6 +161,7 @@
     <button class="chip" data-range="auto" title="その日の水温幅に合わせてコントラストを最大化">フロントを探す</button>
     <button class="chip" data-range="fixed" title="季節固定の色なので日をまたいで比較できる">変化を追う</button>
   </div>
+  <div id="quality-warn" hidden></div>
 </div>
 
 <div class="panel" id="legend-panel">
@@ -167,12 +186,14 @@
     <li>「クロロフィル」レイヤは植物プランクトンの多さ (mg/m³)。<strong>濃い場所の縁（Chl勾配）と水温フロントが重なる所が好漁場の候補</strong>という見方ができます。</li>
     <li>クロロフィルは「クロロフィル」(広域4km・毎日)と「高解像」(300m・晴天時の実測のみ／その日撮れた時だけ出現)。<strong>広域は雲があると補間で埋めた値になる</strong>ため、凡例に「実測カバー率」を表示します。<strong>実測0%の日は全て推定値</strong>なので過信しないでください。</li>
     <li>レイヤの観測日が水温と異なる場合は観測日の横に警告を出します（別日のデータを重ねている状態）。</li>
-    <li><strong>岸から2〜3km以内は陸地の熱の影響を受けるため参考値です。</strong>特に閉鎖性水域（別府湾奥・守江湾内）の値は信頼性が低くなります。薄く表示されている部分は推定誤差が大きい海域です。</li>
-    <li>◀ ▶ ボタンで過去のデータ（約90日分）を見られます。</li>
+    <li><strong>薄く表示された部分は海岸線から約3km以内で、陸地の熱の影響を受けるため参考値です。</strong>特に閉鎖性水域（別府湾奥・守江湾内）は信頼性が低くなります。</li>
+    <li><strong>「ならされた日」の警告が出た日は、観測が乏しく水温分布が均されています。フロントの判読には使わないでください。</strong></li>
+    <li>◀ ▶ ボタンで過去のデータを見られます。</li>
     <li>PC の QGIS では <code>data/latest/sst.tif</code> / <code>front.tif</code>（COG）を HTTP レイヤとして直接開けます。</li>
     <li>参考: <a href="https://www.pref.oita.jp/site/nourinsuisan/beppusokuhou.html" target="_blank" rel="noopener">大分県 海況・魚群速報</a></li>
   </ul>
 </details>
+</div><!-- /top-bar -->
 
 <div id="error-box"></div>
 
@@ -280,11 +301,48 @@
   // レイヤ名（チップ・凡例に使う）
   const LAYER_NAME = { sst: "水温", front: "フロント", chla: "クロロフィル", chla_hires: "クロロフィル(高解像)", chla_grad: "クロロフィル勾配" };
 
+  // 海岸線（欠測=陸セル）からの距離(km)で沿岸を連続的に薄くする係数を計算する。
+  // analysis_error は全域ほぼ一定で使えないため、幾何学的に決まる沿岸汚染を
+  // 決定論的に扱う（レビューv7 修正2）。グリッドごとに一度だけ計算しキャッシュ。
+  const coastCache = new WeakMap();
+  function coastFade(grid, bufferKm) {
+    if (coastCache.has(grid)) return coastCache.get(grid);
+    const W = grid.width, H = grid.height, v = grid.values;
+    const [w, s, e, n] = grid.bbox;
+    const dxKm = (e - w) / W * 111.32 * Math.cos((s + n) / 2 * Math.PI / 180);
+    const dyKm = (n - s) / H * 110.57;
+    const diag = Math.hypot(dxKm, dyKm);
+    const INF = 1e9, d = new Float32Array(W * H);
+    for (let i = 0; i < W * H; i++) d[i] = (v[i] === null || v[i] === undefined) ? 0 : INF;
+    const rel = (i, j, cost) => { if (d[j] + cost < d[i]) d[i] = d[j] + cost; };
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x; if (d[i] === 0) continue;
+      if (x > 0) rel(i, i - 1, dxKm);
+      if (y > 0) rel(i, i - W, dyKm);
+      if (x > 0 && y > 0) rel(i, i - W - 1, diag);
+      if (x < W - 1 && y > 0) rel(i, i - W + 1, diag);
+    }
+    for (let y = H - 1; y >= 0; y--) for (let x = W - 1; x >= 0; x--) {
+      const i = y * W + x; if (d[i] === 0) continue;
+      if (x < W - 1) rel(i, i + 1, dxKm);
+      if (y < H - 1) rel(i, i + W, dyKm);
+      if (x < W - 1 && y < H - 1) rel(i, i + W + 1, diag);
+      if (x > 0 && y < H - 1) rel(i, i + W - 1, diag);
+    }
+    const fade = new Float32Array(W * H);
+    for (let i = 0; i < W * H; i++) {
+      fade[i] = bufferKm > 0 ? Math.max(0.3, Math.min(1, d[i] / bufferKm)) : 1;
+    }
+    coastCache.set(grid, fade);
+    return fade;
+  }
+
   // ---- Canvas 描画 → dataURL ----
   function renderDataURL(grid, layerMeta) {
     const [vmin, vmax] = currentRange(layerMeta);
     const cmap = CMAPS[activeLayer];
-    const errTh = layerMeta.error_threshold;
+    const bufferKm = (meta && meta.coast_buffer_km) || 0;
+    const fade = coastFade(grid, bufferKm);
     const canvas = document.createElement("canvas");
     canvas.width = grid.width; canvas.height = grid.height;
     const ctx = canvas.getContext("2d");
@@ -296,12 +354,8 @@
       if (v === null || v === undefined) { px[o + 3] = 0; continue; }
       const t = normPos(v, vmin, vmax, cmap.scale);
       const [r, g, b] = cmap.color(t);
-      let a = cmap.alpha(t);
-      // 推定誤差が大きいピクセルは信頼度低として薄くする
-      // （SST=analysis_error / クロロフィル=CHL_uncertainty。閾値未設定なら無効）
-      if (errTh != null && grid.errors && grid.errors[i] !== null && grid.errors[i] > errTh) {
-        a *= 0.35;
-      }
+      // 海岸線から coast_buffer_km 以内を連続的に薄くする（陸の熱汚染対策）
+      const a = cmap.alpha(t) * fade[i];
       px[o] = r; px[o + 1] = g; px[o + 2] = b; px[o + 3] = Math.round(a * 255);
     }
     ctx.putImageData(img, 0, 0);
@@ -340,9 +394,11 @@
     $("legend-min").textContent = fmt(vmin);
     $("legend-mid").textContent = fmt(mid);
     $("legend-max").textContent = fmt(vmax);
+    const coastKm = (meta && meta.coast_buffer_km) || 3;
+    const coastTxt = "薄い表示＝海岸線から約" + coastKm + "km以内（陸の熱の影響で参考値）";
     if (activeLayer === "front") {
       $("legend-title").textContent = "フロント強度 (℃/km)";
-      $("legend-note").textContent = "水温の境目の強さ。帯状に強い場所が「潮目」の候補。薄い表示＝推定誤差が大きい海域（沿岸は参考値）";
+      $("legend-note").textContent = "水温の境目の強さ。帯状に強い場所が「潮目」の候補。" + coastTxt;
     } else if (activeLayer === "chla_grad") {
       $("legend-title").textContent = "クロロフィル勾配 (mg/m³/km)";
       $("legend-note").innerHTML = "クロロフィルの濃淡の境目。水温フロントと重なる場所が好漁場候補。"
@@ -359,10 +415,8 @@
       }
     } else {
       $("legend-title").textContent = "海面水温 (℃)";
-      $("legend-note").textContent = "薄い表示＝推定誤差が大きい海域（主に沿岸・湾内は参考値）";
-      if (rangeMode === "fixed") {
-        $("legend-note").textContent += "。色は季節固定（日をまたいで比較可）";
-      }
+      $("legend-note").textContent = coastTxt
+        + (rangeMode === "fixed" ? "。色は季節固定（日をまたいで比較可）" : "");
     }
   }
 
@@ -481,6 +535,23 @@
     }
     updateLegend(layerMeta);
     updateInfo(layerMeta, isLatest);
+    updateQualityWarn();
+  }
+
+  // 「ならされた日」の警告。水温/フロントは背景場に緩んでいて判読不可（修正1）
+  function updateQualityWarn() {
+    const el = $("quality-warn");
+    const sm = meta.layers.sst;
+    const affected = activeLayer === "sst" || activeLayer === "front";
+    if (affected && sm && sm.low_variance) {
+      el.innerHTML = "⚠ この日は水温分布がならされています（空間ばらつき "
+        + (sm.spatial_std != null ? sm.spatial_std.toFixed(2) + "℃" : "小")
+        + "）。観測が乏しく解析の背景場に近いため、"
+        + (activeLayer === "front" ? "<u>フロントは実在しない模様を描くおそれがあります</u>。" : "<u>フロント判読には使わないでください</u>。");
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+    }
   }
 
   // ---- UI: レイヤ・レンジ切替 ----
@@ -525,6 +596,15 @@
       error: grid.errors ? grid.errors[i] : null
     };
   }
+  // その地点が沿岸（半透明化されている＝coast_fade<1）か
+  function isCoastal(grid, lng, lat) {
+    const [w, s, e, n] = grid.bbox;
+    if (lng < w || lng > e || lat < s || lat > n) return false;
+    const col = Math.min(grid.width - 1, Math.floor((lng - w) / (e - w) * grid.width));
+    const row = Math.min(grid.height - 1, Math.floor((n - lat) / (n - s) * grid.height));
+    const fade = coastFade(grid, (meta && meta.coast_buffer_km) || 0);
+    return fade[row * grid.width + col] < 0.999;
+  }
   map.on("click", (ev) => {
     const { lng, lat } = ev.lngLat;
     // 見出しは表示中レイヤの値。SST 以外のレイヤでも水温を併記する
@@ -547,9 +627,9 @@
       html += " / 推定誤差 ±" + primary.error.toFixed(1) + "℃";
     }
     html += "</div>";
-    const th = meta.layers[activeLayer] && meta.layers[activeLayer].error_threshold;
-    if (th && primary.error !== null && primary.error !== undefined && primary.error > th) {
-      html += '<div class="popup-warn">※沿岸・湾内のため参考値</div>';
+    // 沿岸（薄く表示されている場所）は参考値である旨を添える
+    if (currentGrid && isCoastal(currentGrid, lng, lat)) {
+      html += '<div class="popup-warn">※海岸線に近く陸の熱の影響を受けるため参考値</div>';
     }
     popup.setLngLat(ev.lngLat).setHTML(html).addTo(map);
   });

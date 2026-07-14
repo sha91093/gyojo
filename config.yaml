@@ -28,8 +28,11 @@ sst:
     base_url: https://coastwatch.pfeg.noaa.gov/erddap
     dataset_id: jplMURSST41
     variable: analysed_sst
-    # 推定誤差（℃）。沿岸ピクセルの信頼度表示に使う（レビュー A-2）
+    # 推定誤差（℃）。取得は続けるが値が全域ほぼ一定(≈0.4)で信頼度指標に
+    # 使えないと判明したため、半透明化には使わない（レビューv7 発見2）
     error_variable: analysis_error
+    # 平年偏差（℃）。異常日の切り分け用にログへ出す（レビューv7 修正3-1）
+    anomaly_variable: sst_anomaly
     # MUR の time 座標は毎日 09:00:00Z
     time_of_day: "09:00:00Z"
   # 公開ラグ対策: 今日から最大N日遡り、取得できた最新日を採用する
@@ -59,10 +62,19 @@ sst:
       summer: [22.0, 29.0]   # 6-10月
       winter: [12.0, 20.0]   # 11-5月（要検証）
 
-  # analysis_error がこの値（℃）を超えるピクセルは
-  # 信頼度が低いものとして半透明表示する
+  # 沿岸ピクセルの信頼度表示（レビューv7 修正2）。
+  # analysis_error は全域ほぼ一定で使えないため、決定論的な「海岸線からの距離」で
+  # 陸の熱放射に汚染されやすい沿岸を半透明化する。距離はフロント側で JS 計算する
   confidence:
-    error_threshold_c: 0.5
+    # 海岸線からこの距離(km)以内を参考値として連続的に薄くする
+    coast_buffer_km: 3.0
+
+  # 日次データ品質（レビューv7 修正1）。
+  # 有効観測が乏しい日は L4 解析が背景場へ緩み、空間ばらつきが潰れる。
+  # 空間標準偏差がこれ未満なら low_variance として警告する
+  # （7/11=0.758 正常 / 7/13=0.239 異常 の中間）
+  quality:
+    min_spatial_std_c: 0.35
 
 # 水温フロント強度（フェーズ2 / レビュー C-1）
 front:

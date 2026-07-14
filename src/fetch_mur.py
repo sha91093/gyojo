@@ -54,8 +54,9 @@ def _griddap_url(cfg: dict, date: dt.date) -> str:
         f"[({b['min_lon']}):({b['max_lon']})]"
     )
     variables = [e["variable"]]
-    if e.get("error_variable"):
-        variables.append(e["error_variable"])
+    for opt in ("error_variable", "anomaly_variable"):
+        if e.get(opt):
+            variables.append(e[opt])
     query = ",".join(f"{v}{dims}" for v in variables)
     return f"{e['base_url']}/griddap/{e['dataset_id']}.nc?{query}"
 
@@ -76,22 +77,26 @@ def _latest_available_date(cfg: dict) -> dt.date | None:
     return None
 
 
-def fetch_latest(cfg: dict, out_dir: Path) -> FetchResult:
-    """直近で取得可能な MUR SST を out_dir にダウンロードする。
+def fetch_latest(cfg: dict, out_dir: Path, target_date: dt.date | None = None) -> FetchResult:
+    """MUR SST を out_dir にダウンロードする。
 
-    今日（UTC）から lookback_days 日遡り、最初に成功した日を返す。
+    target_date を指定するとその日だけを取得する（過去日検証用 / 修正3-2）。
+    未指定なら今日から lookback_days 日遡り、最初に成功した日を返す。
     全滅した場合は RuntimeError。
     """
     out_dir.mkdir(parents=True, exist_ok=True)
-    today = dt.datetime.now(dt.timezone.utc).date()
 
-    start = today
-    latest = _latest_available_date(cfg)
-    if latest is not None:
-        start = min(start, latest)
-        log.info("ERDDAP の最新データ日: %s", latest)
-
-    lookback = int(cfg["sst"]["lookback_days"])
+    if target_date is not None:
+        log.info("指定日を取得します: %s", target_date)
+        start, lookback = target_date, 0
+    else:
+        today = dt.datetime.now(dt.timezone.utc).date()
+        start = today
+        latest = _latest_available_date(cfg)
+        if latest is not None:
+            start = min(start, latest)
+            log.info("ERDDAP の最新データ日: %s", latest)
+        lookback = int(cfg["sst"]["lookback_days"])
     errors: list[str] = []
     for delta in range(lookback + 1):
         date = start - dt.timedelta(days=delta)
