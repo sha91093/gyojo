@@ -4,6 +4,9 @@ on:
   schedule:
     # JST 07:00（MUR の前日データが公開済みの時間帯）
     - cron: "0 22 * * *"
+    # JST 21:00（配信元の公開が遅れた日でも当日中に拾う保険。
+    # 新しいデータが無ければ差分なしでコミットされない）
+    - cron: "0 12 * * *"
   workflow_dispatch:
 
 permissions:
