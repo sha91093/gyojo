@@ -144,17 +144,56 @@ def load_chla(nc_path, cfg: dict, layer_key: str = "chla") -> xr.DataArray:
     return chla
 
 
-def load_chla_gradient(nc_path, cfg: dict) -> xr.DataArray | None:
-    """L3 に含まれるクロロフィル勾配 (CHL_gradient) を読む。無ければ None。"""
-    var = cfg["chla_hires"].get("gradient_variable")
+def load_chla_uncertainty(nc_path, cfg: dict) -> xr.DataArray | None:
+    """広域L4の推定誤差 CHL_uncertainty を読む。無ければ None。
+
+    SST の analysis_error と同じく、値が大きいピクセルを半透明化するのに使う。
+    校正のため値域をログに出す（閾値は実データを見てから決める）。
+    """
+    var = cfg["chla"].get("uncertainty_variable")
     if not var:
         return None
     try:
-        grad = _read_var(nc_path, var).where(lambda x: np.isfinite(x))
-        return grad.assign_attrs(units="mg m-3 km-1")
+        unc = _read_var(nc_path, var)
     except KeyError:
-        log.warning("%s が L3 に無いためクロロフィル勾配はスキップします", var)
+        log.warning("%s が無いためクロロフィルの信頼度表示はスキップします", var)
         return None
+    finite = unc.values[np.isfinite(unc.values)]
+    if finite.size:
+        log.info(
+            "CHL_uncertainty 値域: min=%.4f p50=%.4f p90=%.4f max=%.4f（閾値校正の参考）",
+            float(finite.min()), float(np.percentile(finite, 50)),
+            float(np.percentile(finite, 90)), float(finite.max()),
+        )
+    return unc
+
+
+def log_flags_summary(nc_path, cfg: dict) -> None:
+    """flags 変数の中身を確認用にログへ要約出力する（補間/実測ビットの手がかり）。"""
+    var = cfg["chla"].get("flags_variable")
+    if not var:
+        return
+    try:
+        flags = _read_var(nc_path, var)
+    except KeyError:
+        return
+    vals = flags.values[np.isfinite(flags.values)]
+    if vals.size:
+        uniq = np.unique(vals.astype("int64"))
+        head = ", ".join(str(int(u)) for u in uniq[:12])
+        log.info("flags のユニーク値（先頭12件 / 全%d種）: %s", uniq.size, head)
+
+
+def compute_chla_gradient(chla: xr.DataArray) -> xr.DataArray:
+    """広域(gap-free 4km)クロロフィルの勾配強度 (mg/m^3/km) を計算する。
+
+    穴のない広域データに対して SST フロントと同じ Sobel 法を使う。
+    L3(300m)は雲で穴だらけのため勾配計算に使わない（大穴を埋めると虚構になる）。
+    """
+    grad = compute_front(chla)  # 同じ Sobel + cos(lat) 正規化を流用
+    grad.attrs.update(units="mg m-3 km-1", long_name="chlorophyll gradient")
+    grad = grad.rio.set_spatial_dims(x_dim="lon", y_dim="lat")
+    return grad.rio.write_crs("EPSG:4326")
 
 
 def measured_mask_on(broad: xr.DataArray, hires: xr.DataArray) -> np.ndarray:

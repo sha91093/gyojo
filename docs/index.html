@@ -164,8 +164,8 @@
     <li><strong>海面をタップすると、その地点の数値が出ます。</strong></li>
     <li>色の切替: 「フロントを探す」はその日の水温幅でコントラスト最大化、「変化を追う」は季節固定の色なので昨日との比較ができます。</li>
     <li>「フロント」レイヤは水温の境目の強さ (℃/km)。<strong>暖水と冷水の境目には回遊魚が集まりやすい</strong>とされます。</li>
-    <li>「クロロフィル」レイヤは植物プランクトンの多さ (mg/m³)。<strong>濃い場所の縁と水温フロントが重なる所が好漁場の候補</strong>という見方ができます。</li>
-    <li>クロロフィルは2種類:「クロロフィル」(広域4km・毎日)と「高解像」(300m・晴天時のみ)。広域の<strong>薄い部分は雲を補間で埋めた値</strong>で、実測カバー率を凡例に表示します。</li>
+    <li>「クロロフィル」レイヤは植物プランクトンの多さ (mg/m³)。<strong>濃い場所の縁（Chl勾配）と水温フロントが重なる所が好漁場の候補</strong>という見方ができます。</li>
+    <li>クロロフィルは「クロロフィル」(広域4km・毎日)と「高解像」(300m・晴天時の実測のみ／その日撮れた時だけ出現)。<strong>広域は雲があると補間で埋めた値になる</strong>ため、凡例に「実測カバー率」を表示します。<strong>実測0%の日は全て推定値</strong>なので過信しないでください。</li>
     <li>レイヤの観測日が水温と異なる場合は観測日の横に警告を出します（別日のデータを重ねている状態）。</li>
     <li><strong>岸から2〜3km以内は陸地の熱の影響を受けるため参考値です。</strong>特に閉鎖性水域（別府湾奥・守江湾内）の値は信頼性が低くなります。薄く表示されている部分は推定誤差が大きい海域です。</li>
     <li>◀ ▶ ボタンで過去のデータ（約90日分）を見られます。</li>
@@ -297,13 +297,10 @@
       const t = normPos(v, vmin, vmax, cmap.scale);
       const [r, g, b] = cmap.color(t);
       let a = cmap.alpha(t);
-      // 推定誤差が大きいピクセルは信頼度低として薄くする（SST/フロント）
-      if (errTh && grid.errors && grid.errors[i] !== null && grid.errors[i] > errTh) {
+      // 推定誤差が大きいピクセルは信頼度低として薄くする
+      // （SST=analysis_error / クロロフィル=CHL_uncertainty。閾値未設定なら無効）
+      if (errTh != null && grid.errors && grid.errors[i] !== null && grid.errors[i] > errTh) {
         a *= 0.35;
-      }
-      // クロロフィル広域: 雲で欠測し補間で埋めた箇所も薄くする（課題2）
-      if (grid.interpolated && grid.interpolated[i]) {
-        a *= 0.4;
       }
       px[o] = r; px[o + 1] = g; px[o + 2] = b; px[o + 3] = Math.round(a * 255);
     }
@@ -314,6 +311,16 @@
   function gridCoordinates(grid) {
     const [w, s, e, n] = grid.bbox;
     return [[w, n], [e, n], [e, s], [w, s]];
+  }
+
+  // 広域クロロフィルの「実測カバー率」注記。0% は全て補間値なので強く警告する
+  function coverageNote(layerMeta) {
+    const cov = layerMeta.measured_coverage_pct;
+    if (cov == null) return "雲を補間で埋めた値を含みます。";
+    if (cov <= 0) {
+      return '<span style="color:#c62828;font-weight:700">⚠ この日は光学観測がなく、全て補間値です（実測0%）。</span>';
+    }
+    return "この日の実測カバー率は約" + cov + "%（残りは補間値）。";
   }
 
   // ---- 凡例 ----
@@ -338,20 +345,18 @@
       $("legend-note").textContent = "水温の境目の強さ。帯状に強い場所が「潮目」の候補。薄い表示＝推定誤差が大きい海域（沿岸は参考値）";
     } else if (activeLayer === "chla_grad") {
       $("legend-title").textContent = "クロロフィル勾配 (mg/m³/km)";
-      $("legend-note").textContent = "クロロフィルの濃淡の境目。水温フロントと重なる場所が好漁場候補（晴天時のみ・雲域は欠測）";
+      $("legend-note").innerHTML = "クロロフィルの濃淡の境目。水温フロントと重なる場所が好漁場候補。"
+        + coverageNote(layerMeta);
     } else if (activeLayer === "chla" || activeLayer === "chla_hires") {
       const hires = activeLayer === "chla_hires";
       $("legend-title").textContent = "クロロフィルa (mg/m³・対数)" + (hires ? " 高解像度" : "");
       let note = "植物プランクトンの多さの目安。濃い場所の縁と水温フロントが重なると好漁場候補。";
       if (hires) {
-        note += "300m解像度・晴天時のみ（雲域は欠測）";
+        note += "300m解像度・晴天時の実測のみ（雲域は欠測）";
+        $("legend-note").textContent = note;
       } else {
-        const cov = layerMeta.measured_coverage_pct;
-        note += (cov != null)
-          ? "薄い部分＝雲で欠測し補間で埋めた値（この日の実測は約" + cov + "%）"
-          : "雲を補間で埋めた値を含みます";
+        $("legend-note").innerHTML = note + coverageNote(layerMeta);
       }
-      $("legend-note").textContent = note;
     } else {
       $("legend-title").textContent = "海面水温 (℃)";
       $("legend-note").textContent = "薄い表示＝推定誤差が大きい海域（主に沿岸・湾内は参考値）";

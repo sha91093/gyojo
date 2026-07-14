@@ -27,10 +27,11 @@ class ChlaBundle:
     def __init__(self):
         self.chla = None
         self.chla_date = None
+        self.uncertainty = None   # CHL_uncertainty（低信頼ピクセルの半透明化に使う）
+        self.gradient = None      # 広域4kmから算出したクロロフィル勾配
         self.measured = None      # L4グリッド上の実測マスク（True=実測, False=補間）
         self.hires = None
         self.hires_date = None
-        self.gradient = None
 
 
 def _try_fetch_chla(cfg: dict, work_dir: Path) -> ChlaBundle:
@@ -49,6 +50,12 @@ def _try_fetch_chla(cfg: dict, work_dir: Path) -> ChlaBundle:
         result = fetch_cmems.fetch_latest(cfg, work_dir)
         bundle.chla = process.clip_bbox(process.load_chla(result.path, cfg), b)
         bundle.chla_date = result.date
+        # 推定誤差（半透明化用）と flags の確認、勾配（穴のない4km側で計算）
+        unc = process.load_chla_uncertainty(result.path, cfg)
+        if unc is not None:
+            bundle.uncertainty = process.clip_bbox(unc, b)
+        process.log_flags_summary(result.path, cfg)
+        bundle.gradient = process.compute_chla_gradient(bundle.chla)
     except fetch_cmems.CredentialsMissing as exc:
         log.warning("クロロフィルをスキップ（認証情報なし）: %s", exc)
         return bundle
@@ -57,16 +64,14 @@ def _try_fetch_chla(cfg: dict, work_dir: Path) -> ChlaBundle:
         return bundle
 
     # --- 高解像度 L3（晴天時のみ。任意） ---
+    # 全面雲/未観測なら hires は全 NaN になり、export 側でレイヤをスキップする。
+    # その場合でも被覆から実測カバー率0%を算出できるので取得は試みる
     if cfg.get("chla_hires", {}).get("enabled", False):
         try:
             hres = fetch_cmems.fetch_hires(cfg, work_dir)
             hires_buf = process.load_chla(hres.path, cfg, layer_key="chla_hires")
             bundle.hires = process.clip_bbox(hires_buf, b)
             bundle.hires_date = hres.date
-            grad = process.load_chla_gradient(hres.path, cfg)
-            if grad is not None:
-                bundle.gradient = process.clip_bbox(grad, b)
-            # L3 の被覆から広域L4の補間箇所を判定（観測日が一致する場合のみ）
             if bundle.chla_date == hres.date:
                 bundle.measured = process.measured_mask_on(bundle.chla, bundle.hires)
             else:
@@ -118,14 +123,13 @@ def main(argv: list[str] | None = None) -> int:
     if cb.chla is not None:
         export.export_all(
             sst=sst, err=err, front=front,
-            chla=cb.chla, chla_date=cb.chla_date, chla_measured=cb.measured,
-            chla_hires=cb.hires, chla_hires_date=cb.hires_date, chla_gradient=cb.gradient,
+            chla=cb.chla, chla_date=cb.chla_date,
+            chla_uncertainty=cb.uncertainty, chla_measured=cb.measured,
+            chla_gradient=cb.gradient,
+            chla_hires=cb.hires, chla_hires_date=cb.hires_date,
             date=result.date, source_url=result.source_url, cfg=cfg,
         )
-        extra = ["広域"]
-        if cb.hires is not None:
-            extra.append("高解像度")
-        log.info("クロロフィル（%s）を追記しました", " / ".join(extra))
+        log.info("クロロフィルを追記しました")
     else:
         log.info("クロロフィルは今回取得できませんでした（SST/フロントのみ公開）")
 

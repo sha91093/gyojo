@@ -79,8 +79,13 @@ chla:
   # 製品: OCEANCOLOUR_GLO_BGC_L4_NRT_009_102
   dataset_id: cmems_obs-oc_glo_bgc-plankton_nrt_l4-gapfree-multi-4km_P1D
   variable: CHL              # クロロフィルa濃度 (mg/m^3)
+  # 推定誤差。SST の analysis_error と同じ仕組みで低信頼ピクセルを半透明化する
+  # （診断ログで [CHL, CHL_uncertainty, flags] を確認済み）
+  uncertainty_variable: CHL_uncertainty
+  # 補間/実測などのビットフラグ。中身確認のため値域をログに出す
+  flags_variable: flags
   # 最新日は open_dataset から特定するので総当たりの遡りは不要。
-  # 念のため最新日から数日だけ空データ回避で降りる小さな保険
+  # NRT は約16日で範囲外になるため大きな lookback は無意味（数日の保険のみ）
   lookback_days: 3
   # この秒数を超えたら取得を諦め、SST/フロントだけ公開する（外部障害対策）。
   # 遅いだけのエンドポイントを拾えるよう、接続リトライ分の余裕を持たせる
@@ -97,17 +102,20 @@ chla:
     auto_percentiles: [2, 98]
     vmin: 0.05
     vmax: 20.0
+  confidence:
+    # CHL_uncertainty がこの値を超えたら半透明化する。
+    # 実データの値域が未確認のため当面 null（無効）。ログの値域を見て次段で校正する
+    uncertainty_threshold: null
 
-# 高解像度クロロフィル（L3 OLCI 300m・晴天時のみ / レビュー課題1・2）
+# 高解像度クロロフィル（L3 OLCI 300m・晴天時のみ / レビュー課題1）
 # SST の二層構成（広域MUR + 高解像度）と同じ思想。雲があると欠測する。
-# この L3 の被覆状況を使い、広域 L4 の「補間で埋めた箇所」を判定する（課題2）
+# この L3 の被覆状況で広域 L4 の実測カバー率も算出する。
+# 注: 実データ診断で CHL_gradient は存在しないと判明。勾配は広域4km側で計算する
 chla_hires:
   enabled: true
   # 製品: OCEANCOLOUR_GLO_BGC_L3_NRT_009_101（OLCI 300m 日次）
   dataset_id: cmems_obs-oc_glo_bgc-plankton_nrt_l3-olci-300m_P1D
   variable: CHL               # クロロフィルa濃度 (mg/m^3)
-  # フロント同様の勾配。L3 に同梱されていれば取得（無ければスキップ）
-  gradient_variable: CHL_gradient
   # 最新日から降りる小さな保険（総当たりはしない）
   lookback_days: 3
   # この秒数を超えたら諦める。高解像度は必須ではないので広域より短め
@@ -119,8 +127,11 @@ chla_hires:
 output:
   docs_dir: docs
   data_dir: docs/data
-  # archive/YYYY-MM-DD/ の保持日数。超えた分は削除しリポジトリ肥大化を防ぐ
-  archive_retention_days: 90
+  # archive/YYYY-MM-DD/ の保持日数。
+  # NRT プロダクトは数週間で CMEMS から消えるため archive が唯一の長期記録。
+  # 値配列JSONは1日数百KBと小さいので 0=全保持（削除しない）とする。
+  # 肥大化が問題になったら日数を設定して古い分を削除する
+  archive_retention_days: 0
 
 web:
   title: 杵築市沖 沿岸漁場支援マップ
