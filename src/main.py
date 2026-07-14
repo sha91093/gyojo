@@ -105,22 +105,30 @@ def main(argv: list[str] | None = None) -> int:
     # 派生レイヤの欠損チェック（岸沿いの NaN 伝播などの再発防止）
     process.check_coverage(sst, front, "front")
 
-    # クロロフィルは独立取得（失敗しても SST/フロントは出力する）
-    cb = _try_fetch_chla(cfg, Path(args.work_dir))
-
+    # --- 修正4: SST/フロントを先に公開する（クロロフィルの完了を待たない） ---
+    # 外部(CMEMS)が落ちていても、確実に取れている SST は必ず公開される
     export.export_all(
         sst=sst, err=err, front=front,
-        chla=cb.chla, chla_date=cb.chla_date, chla_measured=cb.measured,
-        chla_hires=cb.hires, chla_hires_date=cb.hires_date, chla_gradient=cb.gradient,
         date=result.date, source_url=result.source_url, cfg=cfg,
     )
+    log.info("SST / フロントを公開しました（%s）", result.date)
 
-    names = ["SST", "フロント"]
+    # --- クロロフィルは追記。取れたら meta を上書き再出力する ---
+    cb = _try_fetch_chla(cfg, Path(args.work_dir))
     if cb.chla is not None:
-        names.append("クロロフィル")
-    if cb.hires is not None:
-        names.append("クロロフィル(高解像度)")
-    log.info("完了: %s の %s を公開ディレクトリへ出力しました", result.date, " / ".join(names))
+        export.export_all(
+            sst=sst, err=err, front=front,
+            chla=cb.chla, chla_date=cb.chla_date, chla_measured=cb.measured,
+            chla_hires=cb.hires, chla_hires_date=cb.hires_date, chla_gradient=cb.gradient,
+            date=result.date, source_url=result.source_url, cfg=cfg,
+        )
+        extra = ["広域"]
+        if cb.hires is not None:
+            extra.append("高解像度")
+        log.info("クロロフィル（%s）を追記しました", " / ".join(extra))
+    else:
+        log.info("クロロフィルは今回取得できませんでした（SST/フロントのみ公開）")
+
     return 0
 
 

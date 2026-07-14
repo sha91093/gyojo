@@ -1,19 +1,23 @@
-"""クロロフィルa の取得（フェーズ2b）。
+"""クロロフィルの取得（フェーズ2b / Copernicus Marine）。
 
-Copernicus Marine の gap-free L4（雲欠測を時空間補間で埋めた日次プロダクト）を
-`copernicusmarine` ツールキットで bbox+バッファ指定の部分取得する。
+外部エンドポイント不調でジョブが溶けた反省（v5）を踏まえ、以下を徹底する:
 
-- 認証は GitHub Secrets と同名の環境変数（既定 CMEMS_USERNAME / CMEMS_PASSWORD）
-  から読み、ツールキットに明示的に渡す
-- gap-free でも公開ラグがあるため、MUR と同様に直近日を遡って最新日を採用する
-- gap-free とはいえ「補間で埋めた値」であることに注意（元観測が古い可能性）。
-  観測日は meta にレイヤ単位で持ち、古いデータを最新に見せない
+- 日付の総当たりをしない。open_dataset でデータセットの時間・空間範囲を
+  1回で読み、利用可能な最新日だけを subset する（修正1）
+- 取得は別プロセスで走らせ、fetch_timeout_sec を超えたら確実に kill する。
+  スレッドは終了時 join で詰まるため multiprocessing を使う（修正2）
+- HTTP のタイムアウト・リトライは環境変数
+  COPERNICUSMARINE_HTTPS_TIMEOUT / COPERNICUSMARINE_HTTPS_RETRIES で
+  ワークフロー側から絞る（修正3）
+
+クロロフィルは「取れたら嬉しい」レイヤであり、SST の公開を止める権利はない。
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import logging
+import multiprocessing
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,7 +39,6 @@ class FetchResult:
 
 
 def _credentials(cfg: dict) -> tuple[str, str]:
-    # 認証情報のキー名は広域 chla セクションに集約している
     c = cfg["chla"]
     user = os.environ.get(c["username_env"], "").strip()
     pw = os.environ.get(c["password_env"], "").strip()
@@ -46,28 +49,55 @@ def _credentials(cfg: dict) -> tuple[str, str]:
     return user, pw
 
 
-def _fetch(cfg: dict, layer_cfg: dict, out_dir: Path, prefix: str) -> FetchResult:
-    """指定データセットを bbox+バッファ・日次で遡り取得する共通処理。"""
-    import copernicusmarine
+def _probe_and_fetch(q, layer_cfg, user, pw, b, out_dir, prefix):
+    """子プロセス: open_dataset で診断→最新日を1回だけ subset する。
 
-    user, pw = _credentials(cfg)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    b = fetch_mur.buffered_bbox(cfg)  # SST と同じバッファ付き範囲
+    結果は Queue に (status, payload, diag) で返す。
+    status='ok' なら payload=(path, iso_date, dataset_id)。
+    status='err' なら payload=エラー文字列。
+    diag は時間範囲・変数・空間範囲の診断文字列（結論をログに残すため）。
+    """
+    diag = None
+    try:
+        import copernicusmarine
+        import pandas as pd
 
-    variables = [layer_cfg["variable"]]
-    grad = layer_cfg.get("gradient_variable")
-    if grad:
-        variables.append(grad)
+        did = layer_cfg["dataset_id"]
+        ds = copernicusmarine.open_dataset(dataset_id=did, username=user, password=pw)
 
-    today = dt.datetime.now(dt.timezone.utc).date()
-    lookback = int(layer_cfg["lookback_days"])
-    errors: list[str] = []
-    for delta in range(lookback + 1):
-        date = today - dt.timedelta(days=delta)
-        fname = f"{prefix}_{date.isoformat()}.nc"
-        try:
+        lon_name = "longitude" if "longitude" in ds.coords else "lon"
+        lat_name = "latitude" if "latitude" in ds.coords else "lat"
+        tmin = pd.Timestamp(ds["time"].min().values).date()
+        tmax = pd.Timestamp(ds["time"].max().values).date()
+        var_list = list(ds.data_vars)
+        lo0, lo1 = float(ds[lon_name].min()), float(ds[lon_name].max())
+        la0, la1 = float(ds[lat_name].min()), float(ds[lat_name].max())
+        diag = (f"{prefix} [{did}] 時間 {tmin}〜{tmax} / 変数 {var_list} / "
+                f"経度 {lo0:.2f}〜{lo1:.2f} / 緯度 {la0:.2f}〜{la1:.2f}")
+
+        # 空間カバー判定（対象海域がデータ範囲に含まれるか）
+        if not (lo0 <= b["min_lon"] and b["max_lon"] <= lo1
+                and la0 <= b["min_lat"] and b["max_lat"] <= la1):
+            q.put(("err", f"対象海域がデータ範囲外（{prefix}）", diag))
+            return
+
+        primary = layer_cfg["variable"]
+        if primary not in var_list:
+            q.put(("err", f"変数 {primary} がデータセットに無い（{prefix}）", diag))
+            return
+        variables = [primary]
+        grad = layer_cfg.get("gradient_variable")
+        if grad and grad in var_list:
+            variables.append(grad)
+        elif grad:
+            diag += f" / {grad} は無いため勾配スキップ"
+
+        # 利用可能な最新日から数日だけ降りて、空でない日を採る
+        for back in range(int(layer_cfg.get("lookback_days", 3)) + 1):
+            date = tmax - dt.timedelta(days=back)
+            fname = f"{prefix}_{date.isoformat()}.nc"
             copernicusmarine.subset(
-                dataset_id=layer_cfg["dataset_id"],
+                dataset_id=did,
                 variables=variables,
                 minimum_longitude=b["min_lon"],
                 maximum_longitude=b["max_lon"],
@@ -84,24 +114,52 @@ def _fetch(cfg: dict, layer_cfg: dict, out_dir: Path, prefix: str) -> FetchResul
             )
             path = out_dir / fname
             if path.exists() and path.stat().st_size > 0:
-                log.info("%s 取得成功: %s (%d bytes)", prefix, fname, path.stat().st_size)
-                return FetchResult(path=path, date=date, source=layer_cfg["dataset_id"])
-            errors.append(f"{date}: 空ファイル")
-        except Exception as exc:  # 未公開日・全面欠測日は例外になる。遡って再試行する
-            errors.append(f"{date}: {type(exc).__name__}")
-            log.info("%s %s は取得できず（%s）", date, prefix, type(exc).__name__)
+                q.put(("ok", (str(path), date.isoformat(), did), diag))
+                return
+        q.put(("err", f"最新日({tmax})付近で空データ（{prefix}）", diag))
+    except Exception as exc:  # noqa: BLE001  子プロセス内の全例外を親に伝える
+        q.put(("err", f"{type(exc).__name__}: {exc}", diag))
 
-    raise RuntimeError(
-        f"直近 {lookback + 1} 日分の {prefix} をいずれも取得できませんでした: "
-        + "; ".join(errors[:5])
+
+def _fetch_layer(cfg: dict, layer_cfg: dict, out_dir: Path, prefix: str) -> FetchResult:
+    """指定レイヤを別プロセスで取得し、ハードタイムアウトを課す。"""
+    user, pw = _credentials(cfg)
+    b = fetch_mur.buffered_bbox(cfg)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    timeout = int(layer_cfg.get("fetch_timeout_sec", 180))
+
+    ctx = multiprocessing.get_context("fork")
+    q = ctx.Queue()
+    p = ctx.Process(
+        target=_probe_and_fetch, args=(q, layer_cfg, user, pw, b, out_dir, prefix)
     )
+    p.start()
+    p.join(timeout)
+    if p.is_alive():
+        p.terminate()
+        p.join(5)
+        if p.is_alive():
+            p.kill()
+            p.join()
+        raise RuntimeError(f"{prefix} の取得が {timeout}秒 を超えたため中断しました")
+    if q.empty():
+        raise RuntimeError(f"{prefix} の取得が結果を返さず終了しました")
+
+    status, payload, diag = q.get()
+    if diag:
+        log.info("CMEMS診断: %s", diag)  # chla_hires の結論をログに残す
+    if status == "err":
+        raise RuntimeError(payload)
+    path_s, date_s, did = payload
+    log.info("%s 取得成功: %s", prefix, Path(path_s).name)
+    return FetchResult(path=Path(path_s), date=dt.date.fromisoformat(date_s), source=did)
 
 
 def fetch_latest(cfg: dict, out_dir: Path) -> FetchResult:
     """広域クロロフィル（gap-free L4 4km）を取得する。"""
-    return _fetch(cfg, cfg["chla"], out_dir, "chla")
+    return _fetch_layer(cfg, cfg["chla"], out_dir, "chla")
 
 
 def fetch_hires(cfg: dict, out_dir: Path) -> FetchResult:
     """高解像度クロロフィル（L3 OLCI 300m・晴天時のみ）を取得する。"""
-    return _fetch(cfg, cfg["chla_hires"], out_dir, "chla_hires")
+    return _fetch_layer(cfg, cfg["chla_hires"], out_dir, "chla_hires")

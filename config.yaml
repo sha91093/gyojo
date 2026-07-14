@@ -79,8 +79,11 @@ chla:
   # 製品: OCEANCOLOUR_GLO_BGC_L4_NRT_009_102
   dataset_id: cmems_obs-oc_glo_bgc-plankton_nrt_l4-gapfree-multi-4km_P1D
   variable: CHL              # クロロフィルa濃度 (mg/m^3)
-  # 公開ラグ対策。gap-free NRT は数日遅れることがあるため MUR より長めに遡る
-  lookback_days: 10
+  # 最新日は open_dataset から特定するので総当たりの遡りは不要。
+  # 念のため最新日から数日だけ空データ回避で降りる小さな保険
+  lookback_days: 3
+  # この秒数を超えたら取得を諦め、SST/フロントだけ公開する（外部障害対策）
+  fetch_timeout_sec: 120
   # 認証情報を渡す環境変数名（GitHub Secrets と同名。値はコミットしない）
   username_env: CMEMS_USERNAME
   password_env: CMEMS_PASSWORD
@@ -104,8 +107,10 @@ chla_hires:
   variable: CHL               # クロロフィルa濃度 (mg/m^3)
   # フロント同様の勾配。L3 に同梱されていれば取得（無ければスキップ）
   gradient_variable: CHL_gradient
-  # 高解像度は欠測しやすいため広域よりさらに長めに遡る
-  lookback_days: 5
+  # 最新日から降りる小さな保険（総当たりはしない）
+  lookback_days: 3
+  # この秒数を超えたら諦める。高解像度は必須ではない
+  fetch_timeout_sec: 120
   # 出力 JSON が大きくなりすぎたときの間引き（1=間引きなし）。
   # まず素直に出してサイズを実測し、必要なら 2 にする方針
   stride: 1
