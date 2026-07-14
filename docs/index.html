@@ -132,6 +132,7 @@
   <div class="chip-row" id="layer-row" hidden>
     <button class="chip active" data-layer="sst">水温</button>
     <button class="chip" data-layer="front">フロント</button>
+    <button class="chip" data-layer="chla">クロロフィル</button>
   </div>
   <div class="chip-row" id="range-row">
     <span class="chip-label">色:</span>
@@ -159,6 +160,7 @@
     <li><strong>海面をタップすると、その地点の数値が出ます。</strong></li>
     <li>色の切替: 「フロントを探す」はその日の水温幅でコントラスト最大化、「変化を追う」は季節固定の色なので昨日との比較ができます。</li>
     <li>「フロント」レイヤは水温の境目の強さ (℃/km)。<strong>暖水と冷水の境目には回遊魚が集まりやすい</strong>とされます。</li>
+    <li>「クロロフィル」レイヤは植物プランクトンの多さ (mg/m³)。<strong>濃い場所の縁と水温フロントが重なる所が好漁場の候補</strong>という見方ができます。雲の欠測は補間で埋めた値です。</li>
     <li><strong>岸から2〜3km以内は陸地の熱の影響を受けるため参考値です。</strong>特に閉鎖性水域（別府湾奥・守江湾内）の値は信頼性が低くなります。薄く表示されている部分は推定誤差が大きい海域です。</li>
     <li>◀ ▶ ボタンで過去のデータ（約90日分）を見られます。</li>
     <li>PC の QGIS では <code>data/latest/sst.tif</code> / <code>front.tif</code>（COG）を HTTP レイヤとして直接開けます。</li>
@@ -208,10 +210,30 @@
   // 変更を検討する
   function frontAlpha(t) { return t < 0.08 ? 0 : Math.min(0.92, 0.25 + t * 0.75); }
 
+  // クロロフィル用: 貧栄養(青)→中(緑)→ブルーム(黄橙)。多段線形補間
+  function chlaColor(t) {
+    t = Math.min(1, Math.max(0, t));
+    const stops = [ [33, 64, 154], [26, 150, 145], [90, 190, 90], [225, 220, 60], [200, 90, 30] ];
+    const x = t * (stops.length - 1);
+    const i = Math.min(stops.length - 2, Math.floor(x));
+    const f = x - i;
+    return stops[i].map((c, k) => Math.round(c + (stops[i + 1][k] - c) * f));
+  }
+
   const CMAPS = {
-    sst:   { color: turbo,      alpha: () => 0.9 },
-    front: { color: frontColor, alpha: frontAlpha }
+    sst:   { color: turbo,      alpha: () => 0.9,  scale: "linear" },
+    front: { color: frontColor, alpha: frontAlpha, scale: "linear" },
+    chla:  { color: chlaColor,  alpha: () => 0.85, scale: "log" }
   };
+
+  // 値 → 0..1 の正規化位置。対数スケールにも対応
+  function normPos(v, vmin, vmax, scale) {
+    if (scale === "log") {
+      if (v <= 0) return 0;
+      return (Math.log10(v) - Math.log10(vmin)) / (Math.log10(vmax) - Math.log10(vmin));
+    }
+    return (v - vmin) / (vmax - vmin);
+  }
 
   // ---- 状態 ----
   let meta = null;           // 表示中の日の meta.json
@@ -238,11 +260,15 @@
   }
 
   function currentRange(layerMeta) {
-    if (activeLayer === "front") return [layerMeta.vmin, layerMeta.vmax];
-    return rangeMode === "fixed" && layerMeta.fixed_range
-      ? layerMeta.fixed_range
-      : (layerMeta.auto_range || [layerMeta.vmin, layerMeta.vmax]);
+    if (activeLayer === "sst") {
+      return rangeMode === "fixed" && layerMeta.fixed_range
+        ? layerMeta.fixed_range
+        : (layerMeta.auto_range || [layerMeta.vmin, layerMeta.vmax]);
+    }
+    return [layerMeta.vmin, layerMeta.vmax];
   }
+
+  const LAYER_UNIT = { sst: "℃", front: "℃/km", chla: "mg/m³" };
 
   // ---- Canvas 描画 → dataURL ----
   function renderDataURL(grid, layerMeta) {
@@ -258,7 +284,7 @@
       const v = grid.values[i];
       const o = i * 4;
       if (v === null || v === undefined) { px[o + 3] = 0; continue; }
-      const t = (v - vmin) / (vmax - vmin);
+      const t = normPos(v, vmin, vmax, cmap.scale);
       const [r, g, b] = cmap.color(t);
       let a = cmap.alpha(t);
       // 推定誤差が大きいピクセルは信頼度低として薄くする
@@ -286,13 +312,19 @@
       stops.push("rgb(" + r + "," + g + "," + b + ")");
     }
     $("legend-bar").style.background = "linear-gradient(to right, " + stops.join(", ") + ")";
-    const fmt = activeLayer === "front" ? (v) => v.toFixed(2) : (v) => v.toFixed(1);
+    // 中央ラベルはスケールに合わせる（対数なら幾何平均）
+    const mid = cmap.scale === "log" ? Math.sqrt(vmin * vmax) : (vmin + vmax) / 2;
+    const fmt = activeLayer === "sst" ? (v) => v.toFixed(1)
+      : (v) => (v < 1 ? v.toFixed(2) : v.toFixed(1));
     $("legend-min").textContent = fmt(vmin);
-    $("legend-mid").textContent = fmt((vmin + vmax) / 2);
+    $("legend-mid").textContent = fmt(mid);
     $("legend-max").textContent = fmt(vmax);
     if (activeLayer === "front") {
       $("legend-title").textContent = "フロント強度 (℃/km)";
       $("legend-note").textContent = "水温の境目の強さ。帯状に強い場所が「潮目」の候補。薄い表示＝推定誤差が大きい海域（沿岸は参考値）";
+    } else if (activeLayer === "chla") {
+      $("legend-title").textContent = "クロロフィルa (mg/m³・対数)";
+      $("legend-note").textContent = "植物プランクトンの多さの目安。濃い場所の縁と水温フロントが重なると好漁場候補。雲を補間で埋めた値です";
     } else {
       $("legend-title").textContent = "海面水温 (℃)";
       $("legend-note").textContent = "薄い表示＝推定誤差が大きい海域（主に沿岸・湾内は参考値）";
@@ -350,7 +382,7 @@
           tiles: ["https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png"],
           tileSize: 256,
           maxzoom: 18,
-          attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a> | SST: NASA JPL MUR / NOAA CoastWatch'
+          attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a> | SST: NASA JPL MUR / NOAA CoastWatch | Chl: Copernicus Marine'
         }
       },
       layers: [{ id: "gsi", type: "raster", source: "gsi" }]
@@ -425,7 +457,15 @@
     b.addEventListener("click", () => { activeLayer = b.dataset.layer; syncChips(); refreshOverlay(); }));
   document.querySelectorAll("#range-row .chip").forEach(b =>
     b.addEventListener("click", () => { rangeMode = b.dataset.range; syncChips(); refreshOverlay(); }));
-  if (meta.layers.front) $("layer-row").hidden = false;
+  function syncLayerChips(m) {
+    // 存在するレイヤのチップだけ表示する
+    document.querySelectorAll("#layer-row .chip").forEach(b => {
+      b.style.display = m.layers[b.dataset.layer] ? "" : "none";
+    });
+    const extra = m.layers.front || m.layers.chla;
+    $("layer-row").hidden = !extra;
+  }
+  syncLayerChips(meta);
   syncChips();
 
   $("opacity").addEventListener("input", (e) => {
@@ -449,22 +489,28 @@
   }
   map.on("click", (ev) => {
     const { lng, lat } = ev.lngLat;
+    // 見出しは表示中レイヤの値。SST 以外のレイヤでも水温を併記する
+    const primary = gridValueAt(currentGrid, lng, lat);
+    if (!primary || primary.value === null) { popup.remove(); return; }
+    const unit = LAYER_UNIT[activeLayer] || "";
+    const headFmt = activeLayer === "sst" ? primary.value.toFixed(1)
+      : (primary.value < 1 ? primary.value.toFixed(2) : primary.value.toFixed(1));
+    let html = '<div class="popup-val">' + headFmt + unit + "</div>";
+
+    // 補助情報: SST 以外を見ているときは水温も出す
     const sstHit = gridValueAt(currentSstGrid, lng, lat);
-    if (!sstHit || sstHit.value === null) { popup.remove(); return; }
-    let html = '<div class="popup-val">' + sstHit.value.toFixed(1) + "℃</div>";
-    if (activeLayer === "front" && currentGrid) {
-      const f = gridValueAt(currentGrid, lng, lat);
-      if (f && f.value !== null) {
-        html += '<div>フロント強度: <strong>' + f.value.toFixed(2) + "</strong> ℃/km</div>";
-      }
+    if (activeLayer !== "sst" && sstHit && sstHit.value !== null) {
+      html += "<div>水温: <strong>" + sstHit.value.toFixed(1) + "</strong> ℃</div>";
     }
+
     html += '<div class="popup-sub">北緯' + lat.toFixed(2) + " 東経" + lng.toFixed(2);
-    if (sstHit.error !== null && sstHit.error !== undefined) {
-      html += " / 推定誤差 ±" + sstHit.error.toFixed(1) + "℃";
+    // 推定誤差は SST/フロント（analysis_error 由来）でのみ意味を持つ
+    if (activeLayer !== "chla" && primary.error !== null && primary.error !== undefined) {
+      html += " / 推定誤差 ±" + primary.error.toFixed(1) + "℃";
     }
     html += "</div>";
-    const th = meta.layers.sst.error_threshold;
-    if (th && sstHit.error !== null && sstHit.error > th) {
+    const th = meta.layers[activeLayer] && meta.layers[activeLayer].error_threshold;
+    if (th && primary.error !== null && primary.error !== undefined && primary.error > th) {
       html += '<div class="popup-warn">※沿岸・湾内のため参考値</div>';
     }
     popup.setLngLat(ev.lngLat).setHTML(html).addTo(map);
@@ -493,7 +539,10 @@
       } catch (e) { showError(date + " のデータを読み込めませんでした。"); return; }
     }
     currentIdx = idx;
-    $("layer-row").hidden = !meta.layers.front;
+    // 表示中レイヤがこの日に無ければ SST に戻す
+    if (!meta.layers[activeLayer]) activeLayer = "sst";
+    syncLayerChips(meta);
+    syncChips();
     popup.remove();
     await refreshOverlay();
     $("prev-day").disabled = currentIdx === 0;

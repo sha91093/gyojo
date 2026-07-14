@@ -109,6 +109,37 @@ def load_dataset(nc_path, cfg: dict) -> tuple[xr.DataArray, xr.DataArray | None]
     return sst, err
 
 
+def load_chla(nc_path, cfg: dict) -> xr.DataArray:
+    """Copernicus Marine の NetCDF からクロロフィルを読む。
+
+    バッファ付きの取得範囲のまま返す（クリップは呼び出し側）。
+    値は mg/m^3。負値や 0 以下は対数表示で扱えないため NaN にする。
+    """
+    var = cfg["chla"]["variable"]
+    with xr.open_dataset(nc_path, mask_and_scale=True) as ds:
+        if var not in ds:
+            raise KeyError(
+                f"変数 {var} が見つかりません。存在する変数: {list(ds.data_vars)}"
+            )
+        chla = ds[var].load()
+
+    # 深さ次元があれば表層を取る
+    for dim in ("depth", "elevation"):
+        if dim in chla.dims:
+            chla = chla.isel({dim: 0}, drop=True)
+    chla = _normalize(chla)
+    chla = chla.where(chla > 0)  # 対数表示のため 0 以下を除外
+    chla = chla.assign_attrs(units="mg m-3")
+
+    finite = chla.values[np.isfinite(chla.values)]
+    if finite.size:
+        log.info(
+            "クロロフィル読み込み: %d x %d px, %.3f〜%.3f mg/m^3",
+            chla.sizes["lon"], chla.sizes["lat"], float(finite.min()), float(finite.max()),
+        )
+    return chla
+
+
 def compute_front(sst: xr.DataArray) -> xr.DataArray:
     """水温フロント強度 (℃/km) を計算する。
 

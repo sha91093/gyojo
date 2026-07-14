@@ -33,6 +33,10 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Fetch and process satellite data
+        env:
+          # クロロフィル（Copernicus Marine）用。未設定ならSSTのみで続行する
+          CMEMS_USERNAME: ${{ secrets.CMEMS_USERNAME }}
+          CMEMS_PASSWORD: ${{ secrets.CMEMS_PASSWORD }}
         run: python -m src.main
 
       - name: Commit and push updated data

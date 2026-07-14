@@ -6,3 +6,4 @@ rioxarray
 rasterio
 PyYAML
 requests
+copernicusmarine

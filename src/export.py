@@ -49,6 +49,19 @@ def fixed_range_for(date: dt.date, disp: dict) -> list[float]:
     return [float(v) for v in disp["fixed_range"][season]]
 
 
+def log_auto_range(values: np.ndarray, disp: dict) -> tuple[float, float]:
+    """対数スケール向けの自動レンジ（percentile を取り vmin/vmax でクランプ）。"""
+    p_lo, p_hi = disp.get("auto_percentiles", [2, 98])
+    finite = values[np.isfinite(values) & (values > 0)]
+    if finite.size == 0:
+        return float(disp["vmin"]), float(disp["vmax"])
+    vmin = max(float(np.percentile(finite, p_lo)), float(disp["vmin"]))
+    vmax = min(float(np.percentile(finite, p_hi)), float(disp["vmax"]))
+    if vmax <= vmin:
+        vmax = vmin * 2
+    return round(vmin, 3), round(vmax, 3)
+
+
 def write_cog(da: xr.DataArray, path: Path) -> None:
     da.rio.to_raster(path, driver="COG", compress="DEFLATE")
     log.info("COG 出力: %s (%d bytes)", path, path.stat().st_size)
@@ -111,6 +124,8 @@ def export_all(
     date: dt.date,
     source_url: str,
     cfg: dict,
+    chla: xr.DataArray | None = None,
+    chla_date: dt.date | None = None,
 ) -> None:
     """latest/ へ出力し、archive/YYYY-MM-DD/ へコピー、古い archive を削除する。"""
     data_dir = Path(cfg["output"]["data_dir"])
@@ -171,6 +186,27 @@ def export_all(
             "stats": front_payload["stats"],
         }
         written += ["front.tif", "front_values.json"]
+
+    # --- クロロフィル ---
+    if chla is not None:
+        cdisp = cfg["chla"]["display"]
+        write_cog(chla, latest / "chla.tif")
+        chla_payload = write_values_json(chla, latest / "chla_values.json", ndigits=3)
+        cvmin, cvmax = log_auto_range(chla.values, cdisp)
+        layers["chla"] = {
+            "date": (chla_date or date).isoformat(),
+            "source": "Copernicus Marine gap-free L4 (OCEANCOLOUR_GLO_BGC_L4_NRT_009_102)",
+            "variable": str(cfg["chla"]["variable"]),
+            "units": "mg/m³",
+            "cog": "chla.tif",
+            "values": "chla_values.json",
+            "scale": cdisp.get("scale", "log"),
+            "colormap": cdisp.get("colormap", "algae"),
+            "vmin": cvmin,
+            "vmax": cvmax,
+            "stats": chla_payload["stats"],
+        }
+        written += ["chla.tif", "chla_values.json"]
 
     meta = {
         "layers": layers,

@@ -71,6 +71,29 @@ front:
   # 表示レンジ上限の下限値 (℃/km)。凪いだ日でもスケールが潰れないように
   vmax_floor: 0.1
 
+# クロロフィルa（フェーズ2b / Copernicus Marine）
+chla:
+  # 取得を有効にするか。認証情報が無い環境では自動でスキップされる
+  enabled: true
+  # Copernicus Marine の gap-free L4（雲欠測を時空間補間で埋めた日次プロダクト）
+  # 製品: OCEANCOLOUR_GLO_BGC_L4_NRT_009_102
+  dataset_id: cmems_obs-oc_glo_bgc-plankton_nrt_l4-gapfree-multi-4km_P1D
+  variable: CHL              # クロロフィルa濃度 (mg/m^3)
+  # 公開ラグ対策。gap-free NRT は数日遅れることがあるため MUR より長めに遡る
+  lookback_days: 10
+  # 認証情報を渡す環境変数名（GitHub Secrets と同名。値はコミットしない）
+  username_env: CMEMS_USERNAME
+  password_env: CMEMS_PASSWORD
+  display:
+    # クロロフィルは桁で変動するため対数スケールで色付けする
+    scale: log
+    colormap: algae         # 貧栄養(青緑)→ブルーム(黄緑)
+    # 表示レンジ (mg/m^3)。auto のとき percentile から決め、この範囲にクランプ
+    range_mode: auto
+    auto_percentiles: [2, 98]
+    vmin: 0.05
+    vmax: 20.0
+
 output:
   docs_dir: docs
   data_dir: docs/data

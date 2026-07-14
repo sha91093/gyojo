@@ -16,17 +16,21 @@ GitHub Actions (毎日 JST 07:00)
        └─ export.py      COG / 値配列JSON / meta.json を docs/data/ へ出力
             ├─ latest/   常に同名で上書き（Web・QGIS の参照URLを固定）
             └─ archive/YYYY-MM-DD/  過去分（90日で自動削除）
+       └─ fetch_cmems.py  クロロフィル gap-free L4 を取得（任意・認証必要）
 GitHub Pages (docs/)
   ├─ index.html            MapLibre の Web マップ（スマホ対応）
-  └─ data/latest/sst.tif   QGIS から直接開ける COG（front.tif も同様）
+  └─ data/latest/sst.tif   QGIS から直接開ける COG（front.tif / chla.tif も同様）
 ```
 
 ### Web マップの主な機能
 
+- **水温・フロント・クロロフィルの3レイヤ**をワンタップで切替
 - **色付けはブラウザ側の Canvas で実施**（サーバーは物理値の JSON を配るだけ）。
-  「フロントを探す」（その日の水温幅でコントラスト最大化）と
-  「変化を追う」（季節固定レンジ。日をまたいだ比較用）をワンタップで切替できる
-- **海面をタップするとその地点の水温・フロント強度・推定誤差を数値表示**
+  水温は「フロントを探す」（その日の水温幅でコントラスト最大化）と
+  「変化を追う」（季節固定レンジ。日をまたいだ比較用）を切替でき、
+  クロロフィルは対数スケールで表示する
+- **海面をタップするとその地点の水温・フロント強度・クロロフィル濃度・推定誤差を数値表示**
+- クロロフィルは雲欠測を補間した gap-free 値で、**観測日を水温とは別に保持**（古いデータを最新に見せない）
 - `analysis_error` が閾値（既定 0.5℃）を超えるピクセルは**半透明にして信頼度の低さを可視化**
   （主に沿岸・湾内。マイクロ波放射計の陸地汚染対策）
 - 観測日が3日以上古いままの場合は**画面上部に赤い警告バナー**を表示
@@ -45,7 +49,9 @@ GitHub Pages (docs/)
    - Web マップ: `https://<ユーザー名>.github.io/<リポジトリ名>/`
    - COG: `https://<ユーザー名>.github.io/<リポジトリ名>/data/latest/sst.tif`
 
-認証情報は不要です（フェーズ1 は ERDDAP 経由のため。`.env.example` 参照）。
+SST/フロントに認証は不要です（ERDDAP 経由）。**クロロフィルのみ Copernicus Marine の
+無料アカウントが必要**で、GitHub Secrets に `CMEMS_USERNAME` / `CMEMS_PASSWORD` を
+設定します（未設定でも SST/フロントの更新は止まりません）。`.env.example` 参照。
 
 ## ローカル実行
 
@@ -89,7 +95,7 @@ URL は常に固定なので、一度プロジェクトを作れば開くたび�
 
 - [x] フェーズ1: MUR SST の一本通し（取得 → COG → Pages → Web/QGIS 表示）
 - [x] フェーズ2a: 水温フロント強度レイヤ（Sobel 勾配, ℃/km, cos(lat) 補正, バッファ取得で端の破綻を回避）
-- [ ] フェーズ2b: クロロフィル（Copernicus Marine。要 CMEMS アカウント + GitHub Secrets）
+- [x] フェーズ2b: クロロフィル（Copernicus Marine gap-free L4。対数表示・レイヤ独立の観測日）
 - [ ] フェーズ3: GCOM-C/SGLI 250m 高解像度レイヤ（晴天時のみ）
 - [ ] フェーズ4: QGIS プロジェクト（.qgz）の整備
 - [ ] 前日比の差分レイヤ・時系列アニメーション（アーカイブが数日分たまってから）

@@ -16,9 +16,27 @@ from pathlib import Path
 
 import yaml
 
-from src import export, fetch_mur, process
+from src import export, fetch_cmems, fetch_mur, process
 
 log = logging.getLogger(__name__)
+
+
+def _try_fetch_chla(cfg: dict, work_dir: Path):
+    """クロロフィルを取得・前処理する。失敗しても SST 更新は止めない。
+
+    戻り値: (chla DataArray, 観測日) または (None, None)。
+    """
+    if not cfg.get("chla", {}).get("enabled", False):
+        return None, None
+    try:
+        result = fetch_cmems.fetch_latest(cfg, work_dir)
+        chla = process.clip_bbox(process.load_chla(result.path, cfg), cfg["bbox"])
+        return chla, result.date
+    except fetch_cmems.CredentialsMissing as exc:
+        log.warning("クロロフィルをスキップ（認証情報なし）: %s", exc)
+    except Exception as exc:
+        log.warning("クロロフィル取得に失敗（SSTは継続）: %s: %s", type(exc).__name__, exc)
+    return None, None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -48,12 +66,16 @@ def main(argv: list[str] | None = None) -> int:
     # 派生レイヤの欠損チェック（岸沿いの NaN 伝播などの再発防止）
     process.check_coverage(sst, front, "front")
 
+    # クロロフィルは独立取得（失敗しても SST/フロントは出力する）
+    chla, chla_date = _try_fetch_chla(cfg, Path(args.work_dir))
+
     export.export_all(
-        sst=sst, err=err, front=front,
+        sst=sst, err=err, front=front, chla=chla, chla_date=chla_date,
         date=result.date, source_url=result.source_url, cfg=cfg,
     )
 
-    log.info("完了: %s の SST / フロントを公開ディレクトリへ出力しました", result.date)
+    layers = "SST / フロント" + ("" if chla is None else " / クロロフィル")
+    log.info("完了: %s の %s を公開ディレクトリへ出力しました", result.date, layers)
     return 0
 
 

@@ -175,12 +175,16 @@ coastal-fishery-map/
 - [ ] QGIS で `https://<user>.github.io/<repo>/data/latest/sst.tif` をラスタレイヤとして開ける
 - [ ] Actions が2日連続で自動成功している
 
-### フェーズ2: クロロフィル + フロント
+### フェーズ2: クロロフィル + フロント  ← 実装済み
 
-1. `fetch_cmems.py` で Copernicus Marine のクロロフィルを追加
-2. `process.py` にフロント強度計算（第4節）を追加
-3. Web マップにレイヤ切り替え UI（SST / クロロフィル / フロント）を追加
-4. フロント等値線を GeoJSON で重ねる
+1. [x] `process.py` にフロント強度計算（第4節）を追加（Sobel, ℃/km, cos(lat)補正,
+   バッファ取得で端の破綻を回避。岸沿い NaN 伝播も distance_transform で修正済み）
+2. [x] `fetch_cmems.py` で Copernicus Marine のクロロフィルを追加
+   （gap-free L4 `cmems_obs-oc_glo_bgc-plankton_nrt_l4-gapfree-multi-4km_P1D`。
+   認証は CMEMS_USERNAME/PASSWORD。取得失敗でも SST/フロントは継続する）
+3. [x] Web マップにレイヤ切り替え UI（水温 / フロント / クロロフィル）を追加
+   （色付けはブラウザ側 Canvas。クロロフィルは対数スケール、観測日はレイヤ独立）
+4. [ ] フロント等値線を GeoJSON で重ねる（未実装。当面はラスタ表示で運用）
 
 ### フェーズ3: GCOM-C 250m
 
