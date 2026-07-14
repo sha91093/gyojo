@@ -8,6 +8,11 @@ on:
     # 新しいデータが無ければ差分なしでコミットされない）
     - cron: "0 12 * * *"
   workflow_dispatch:
+    inputs:
+      date:
+        description: "取得する観測日 (YYYY-MM-DD)。空欄なら最新日を自動取得"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -46,7 +51,15 @@ jobs:
           # （取得コード側の fetch_timeout_sec と 30分ジョブ上限で暴走は防ぐ）
           COPERNICUSMARINE_HTTPS_TIMEOUT: "30"
           COPERNICUSMARINE_HTTPS_RETRIES: "2"
-        run: python -m src.main
+          # 手動実行で日付を指定した場合のみその過去日を取得（検証・穴埋め用）
+          TARGET_DATE: ${{ github.event.inputs.date }}
+        run: |
+          if [ -n "$TARGET_DATE" ]; then
+            echo "指定日を取得: $TARGET_DATE"
+            python -m src.main --date "$TARGET_DATE"
+          else
+            python -m src.main
+          fi
 
       - name: Commit and push updated data
         # このワークフローは push では起動しないためコミットループは発生しないが、

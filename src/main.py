@@ -119,8 +119,10 @@ def main(argv: list[str] | None = None) -> int:
     export.export_all(
         sst=sst, err=err, front=front,
         date=result.date, source_url=result.source_url, cfg=cfg,
+        archive_only=(target_date is not None),
     )
-    log.info("SST / フロントを公開しました（%s）", result.date)
+    log.info("SST / フロントを%s（%s）",
+             "archive へ保存しました" if target_date else "公開しました", result.date)
 
     # --- クロロフィルは追記。取れたら meta を上書き再出力する ---
     cb = _try_fetch_chla(cfg, Path(args.work_dir))
@@ -132,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
             chla_gradient=cb.gradient,
             chla_hires=cb.hires, chla_hires_date=cb.hires_date,
             date=result.date, source_url=result.source_url, cfg=cfg,
+            archive_only=(target_date is not None),
         )
         log.info("クロロフィルを追記しました")
     else:

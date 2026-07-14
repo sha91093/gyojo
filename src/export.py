@@ -142,19 +142,28 @@ def export_all(
     chla_gradient: xr.DataArray | None = None,
     chla_hires: xr.DataArray | None = None,
     chla_hires_date: dt.date | None = None,
+    archive_only: bool = False,
 ) -> None:
-    """latest/ へ出力し、archive/YYYY-MM-DD/ へコピー、古い archive を削除する。"""
+    """成果物を出力する。
+
+    通常は latest/ へ出力し archive/YYYY-MM-DD/ へコピーする。
+    archive_only=True（過去日の穴埋め）のときは archive/ にだけ書き、
+    最新表示の latest/ は上書きしない。
+    """
     data_dir = Path(cfg["output"]["data_dir"])
     latest = data_dir / "latest"
-    latest.mkdir(parents=True, exist_ok=True)
+    archive = data_dir / "archive" / date.isoformat()
+    # 書き込み先: 通常は latest、穴埋め時は archive 直下
+    stage = archive if archive_only else latest
+    stage.mkdir(parents=True, exist_ok=True)
     bbox = cfg["bbox"]
     disp = cfg["sst"]["display"]
 
     # --- SST ---
-    sst_payload = write_values_json(sst, latest / "sst_values.json", errors=err, name="sst")
+    sst_payload = write_values_json(sst, stage / "sst_values.json", errors=err, name="sst")
     if sst_payload is None:
         raise RuntimeError("SST に有効ピクセルが無く公開できません（取得データを確認）")
-    write_cog(sst, latest / "sst.tif")
+    write_cog(sst, stage / "sst.tif")
     vmin, vmax = auto_range(sst.values, disp)
 
     # 日次品質: 空間標準偏差が小さい日は観測が乏しく背景場へ緩んでいる（修正1）
@@ -191,10 +200,10 @@ def export_all(
         # errors は SST の analysis_error を流用する。沿岸SSTの信頼度が低い以上、
         # そこから微分したフロントの信頼度はさらに低いため、同じ基準で薄く表示する
         front_payload = write_values_json(
-            front, latest / "front_values.json", errors=err, ndigits=3, name="front"
+            front, stage / "front_values.json", errors=err, ndigits=3, name="front"
         )
     if front_payload is not None:
-        write_cog(front, latest / "front.tif")
+        write_cog(front, stage / "front.tif")
         fcfg = cfg.get("front", {})
         pct = float(fcfg.get("vmax_percentile", 98))
         finite = front.values[np.isfinite(front.values)]
@@ -228,11 +237,11 @@ def export_all(
             coverage = round(float((chla_measured & sea).sum()) / n_sea * 100, 1) if n_sea else None
             log.info("クロロフィル実測カバー率: %s%%", coverage)
         chla_payload = write_values_json(
-            chla, latest / "chla_values.json",
+            chla, stage / "chla_values.json",
             errors=chla_uncertainty, ndigits=3, name="chla",
         )
         if chla_payload is not None:
-            write_cog(chla, latest / "chla.tif")
+            write_cog(chla, stage / "chla.tif")
             cvmin, cvmax = log_auto_range(chla.values, cdisp)
             layers["chla"] = {
                 "date": (chla_date or date).isoformat(),
@@ -254,11 +263,11 @@ def export_all(
     # --- クロロフィル勾配（穴のない広域4kmから算出。L3の大穴は埋めない） ---
     if chla_gradient is not None:
         grad_payload = write_values_json(
-            chla_gradient, latest / "chla_grad_values.json",
+            chla_gradient, stage / "chla_grad_values.json",
             errors=chla_uncertainty, ndigits=4, name="chla_grad",
         )
         if grad_payload is not None:
-            write_cog(chla_gradient, latest / "chla_grad.tif")
+            write_cog(chla_gradient, stage / "chla_grad.tif")
             gfinite = chla_gradient.values[np.isfinite(chla_gradient.values)]
             gvmax = float(np.percentile(gfinite, 98)) if gfinite.size else 1.0
             layers["chla_grad"] = {
@@ -277,10 +286,10 @@ def export_all(
     # --- クロロフィル（高解像度 L3 300m・晴天時のみ。全欠測日はスキップ） ---
     if chla_hires is not None:
         hires_payload = write_values_json(
-            chla_hires, latest / "chla_hires_values.json", ndigits=3, name="chla_hires",
+            chla_hires, stage / "chla_hires_values.json", ndigits=3, name="chla_hires",
         )
         if hires_payload is not None:
-            write_cog(chla_hires, latest / "chla_hires.tif")
+            write_cog(chla_hires, stage / "chla_hires.tif")
             hvmin, hvmax = log_auto_range(chla_hires.values, cdisp)
             layers["chla_hires"] = {
                 "date": (chla_hires_date or date).isoformat(),
@@ -305,23 +314,24 @@ def export_all(
         "coast_buffer_km": float(cfg["sst"]["confidence"].get("coast_buffer_km", 0.0)),
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     }
-    (latest / "meta.json").write_text(
+    (stage / "meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     written.append("meta.json")
-    log.info("meta.json 出力: %s", latest / "meta.json")
+    log.info("meta.json 出力: %s", stage / "meta.json")
 
-    # --- 幽霊ファイルの掃除: meta に載っていないレイヤの残骸を latest から消す ---
-    # （前回取れて今回取れなかったレイヤの古いファイルが公開され続けるのを防ぐ。
-    #   「古いデータを最新に見せかけない」設計思想の徹底。archive 側は残す）
-    _prune_ghost_files(latest, layers, written)
-
-    # --- archive ---
-    archive = data_dir / "archive" / date.isoformat()
-    archive.mkdir(parents=True, exist_ok=True)
-    for name in written:
-        shutil.copy2(latest / name, archive / name)
-    log.info("archive へコピー: %s", archive)
+    if archive_only:
+        # 穴埋めモード: archive に直接書いたので latest は触らない
+        log.info("archive のみ更新: %s（latest は上書きしない）", archive)
+    else:
+        # 幽霊ファイルの掃除: meta に載っていないレイヤの残骸を latest から消す
+        # （前回取れて今回取れなかったレイヤの古いファイルが残るのを防ぐ。archive は残す）
+        _prune_ghost_files(latest, layers, written)
+        # latest → archive へコピー
+        archive.mkdir(parents=True, exist_ok=True)
+        for name in written:
+            shutil.copy2(latest / name, archive / name)
+        log.info("archive へコピー: %s", archive)
 
     _prune_archive(data_dir / "archive", int(cfg["output"]["archive_retention_days"]))
     _write_archive_index(data_dir / "archive")
