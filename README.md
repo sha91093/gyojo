@@ -3,8 +3,36 @@
 杵築市沖（別府湾・伊予灘）を対象とした、衛星海面水温（SST）と水温フロント強度の日次自動更新マップ。
 毎朝 GitHub Actions が衛星データを取得し、GitHub Pages 上の Web マップと QGIS 用 COG を更新します。
 
-仕様の詳細は [PLAN.md](PLAN.md) を参照。フェーズ1（MUR SST の一本通し）と
-フェーズ2の水温フロント強度レイヤまで実装済みです。
+仕様の詳細は [PLAN.md](PLAN.md) を参照。
+
+## データ源の移行（MUR → GCOM-C/SGLI, GEE 経由）
+
+MUR SST は観測が乏しい日に分布がならされる・更新が遅いなどの限界が実運用で判明したため、
+**JAXA GCOM-C/SGLI（Google Earth Engine 経由）への移行**を進めています。SST とクロロフィルが
+同一センサ・同一観測日で揃い、QA フラグで信頼度を出せるのが利点です。
+
+現行を止めないため **`config.yaml` の `sst.source` で切り替える**方式にしています。
+既定は `erddap`（現行 MUR）。検証が済むまで公開マップは MUR のまま動きます。
+
+### GEE 移行のセットアップ（フェーズ0・利用者作業）
+
+1. Google Cloud プロジェクトを作成し **Earth Engine API を有効化**
+2. **サービスアカウント**を作成し Earth Engine 利用権限を付与、**JSON鍵**を発行
+3. その JSON鍵の中身（全文）を GitHub Secrets に **`GEE_SERVICE_ACCOUNT_KEY`** として登録
+4. GEE 登録区分（非営利/政府）で自治体利用が該当するか確認（手続き）
+
+### 切り替え手順
+
+1. 上のフェーズ0を完了する
+2. まず疎通確認: Actions で手動実行するか、ローカルで `python -m src.fetch_gee`
+   （認証して GCOM-C SST を1枚取得できるか。**ここが最初の関門**）
+3. 通ったら `config.yaml` の `sst.source: gee` に変更してプッシュ
+4. Web マップに GCOM-C の SST が出て、出所表示が「JAXA GCOM-C/SGLI」に変われば移行成功
+
+原初データ提供: JAXA（GCOM-C/SGLI）／ Data source: JAXA GCOM-C/SGLI, processed via Google Earth Engine
+
+これまでの実装（フロント計算・品質指標・沿岸半透明化・Web表示・archive 全保持）は
+データ源に依存しないため、移行後もそのまま使えます。
 
 ## 仕組み
 

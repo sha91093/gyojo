@@ -19,10 +19,9 @@ bbox:
 bbox_buffer_deg: 0.15
 
 sst:
-  # 取得元: NOAA CoastWatch ERDDAP が再配信する MUR SST v4.1
-  # （NASA JPL PO.DAAC の MUR-JPL-L4-GLOB-v4.1 と同一データ。
-  #   ERDDAP はサーバー側で bbox 切り出しができ、認証不要のため
-  #   日次CIに適する。詳細は README「データ取得経路について」参照）
+  # 取得元スイッチ: erddap（現行 MUR）/ gee（GCOM-C/SGLI 移行先）。
+  # GEE 移行は認証(サービスアカウント)が Actions から通ることを確認できるまで
+  # erddap のまま運用し、検証後に gee へ切り替える（現行公開を止めないため）
   source: erddap
   erddap:
     base_url: https://coastwatch.pfeg.noaa.gov/erddap
@@ -82,6 +81,35 @@ front:
   vmax_percentile: 98
   # 表示レンジ上限の下限値 (℃/km)。凪いだ日でもスケールが潰れないように
   vmax_floor: 0.1
+
+# =========================================================
+# GCOM-C/SGLI 移行（Google Earth Engine 経由）
+# sst.source: gee のとき使う。既定 erddap では未使用。
+# 認証はサービスアカウントJSON鍵を GitHub Secrets から渡す（フェーズ0で登録）
+# スケール係数・QAビット定義は GEE カタログで確認済み/要確認を明記
+# =========================================================
+gee:
+  # サービスアカウントJSON鍵（文字列）を格納した環境変数名（GitHub Secrets 同名）
+  service_account_key_env: GEE_SERVICE_ACCOUNT_KEY
+  # 明示する場合の GCP プロジェクトID（未指定なら鍵JSONの project_id を使う）
+  project: ""
+  # 最新画像はコレクションから特定するので総当たり不要。取得ウィンドウ
+  lookback_days: 10
+  # 外部呼び出しのハードタイムアウト（GEE も例外ではない）
+  fetch_timeout_sec: 180
+  # getDownloadURL の解像度(m)。L3 OCEAN V3 の native はおよそ 4.6km。
+  # TODO: 正確な native 解像度をカタログ/実データで確認して調整する
+  download_scale_m: 4638
+  sst:
+    collection: JAXA/GCOM-C/L3/OCEAN/SST/V3
+    band: SST_AVE
+    qa_band: SST_QA_flag
+    # カタログ確認済み: 物理値 = raw * scale + offset（℃）
+    scale: 0.0012
+    offset: -10.0
+    # 昼夜フィルタ SATELLITE_DIRECTION=='D'。SST は夜間も有効なので既定OFF。
+    # TODO: 昼夜の扱いは実データを見て検討する
+    daytime_only: false
 
 # クロロフィルa（フェーズ2b / Copernicus Marine）
 chla:

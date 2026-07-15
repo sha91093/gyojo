@@ -474,7 +474,9 @@
           tiles: ["https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png"],
           tileSize: 256,
           maxzoom: 18,
-          attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a> | SST: NASA JPL MUR / NOAA CoastWatch | Chl: Copernicus Marine'
+          attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a> | '
+            + ((meta && meta.layers && meta.layers.sst && meta.layers.sst.source) || 'SST: NASA JPL MUR / NOAA CoastWatch')
+            + (meta && meta.layers && meta.layers.chla ? ' | Chl: JAXA/Copernicus' : '')
         }
       },
       layers: [{ id: "gsi", type: "raster", source: "gsi" }]

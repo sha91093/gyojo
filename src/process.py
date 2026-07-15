@@ -128,6 +128,28 @@ def spatial_std(da: xr.DataArray) -> float:
     return float(v.std()) if v.size else 0.0
 
 
+def load_gee_raster(tif_path, cfg: dict) -> xr.DataArray:
+    """GEE が出力した GeoTIFF（既に℃・スケール適用済み）を読む。
+
+    バッファ付きの取得範囲のまま返す（クリップは呼び出し側）。
+    fetch_gee 側で scale/offset を適用しているのでここでは単位変換しない。
+    """
+    da = rioxarray.open_rasterio(tif_path, masked=True)
+    if "band" in da.dims:
+        da = da.isel(band=0, drop=True)
+    da = da.rename({"y": "lat", "x": "lon"})
+    # GEE の GeoTIFF は 0 や極端値を欠測にしていることがあるため NaN 化の保険
+    da = da.where(np.isfinite(da))
+    da = _normalize(da).assign_attrs(units="degree_C")
+    finite = da.values[np.isfinite(da.values)]
+    if finite.size:
+        log.info(
+            "GCOM-C SST 読み込み: %d x %d px, %.2f〜%.2f ℃",
+            da.sizes["lon"], da.sizes["lat"], float(finite.min()), float(finite.max()),
+        )
+    return da
+
+
 def _read_var(nc_path, var: str) -> xr.DataArray:
     """NetCDF から 1 変数を読み、lat/lon 正規化・表層抽出したものを返す。"""
     with xr.open_dataset(nc_path, mask_and_scale=True) as ds:

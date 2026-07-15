@@ -7,3 +7,4 @@ rasterio
 PyYAML
 requests
 copernicusmarine
+earthengine-api

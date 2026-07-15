@@ -173,11 +173,17 @@ def export_all(
     if low_variance:
         log.warning("SST 空間標準偏差 %.3f℃ < %.2f: ならされた日と判定（フロント判読不可）", std, min_std)
 
+    if cfg["sst"].get("source") == "gee":
+        src_label = "GCOM-C/SGLI (JAXA), processed via Google Earth Engine"
+        src_variable = str(cfg["gee"]["sst"]["band"])
+    else:
+        src_label = "MUR SST v4.1 (NASA JPL PO.DAAC / NOAA CoastWatch ERDDAP)"
+        src_variable = str(cfg["sst"]["erddap"]["variable"])
     sst_meta = {
         "date": date.isoformat(),
-        "source": "MUR SST v4.1 (NASA JPL PO.DAAC / NOAA CoastWatch ERDDAP)",
+        "source": src_label,
         "source_url": source_url,
-        "variable": str(cfg["sst"]["erddap"]["variable"]),
+        "variable": src_variable,
         "units": "℃",
         "cog": "sst.tif",
         "values": "sst_values.json",

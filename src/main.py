@@ -120,10 +120,21 @@ def main(argv: list[str] | None = None) -> int:
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
     bbox = cfg["bbox"]
 
-    result = fetch_mur.fetch_latest(cfg, Path(args.work_dir), target_date=target_date)
+    # --- データ源スイッチ: erddap(現行 MUR) / gee(GCOM-C 移行先) ---
+    source = cfg["sst"].get("source", "erddap")
+    if source == "gee":
+        from src import fetch_gee
+        result = fetch_gee.fetch_sst(cfg, Path(args.work_dir), target_date=target_date)
+        sst_buf = process.load_gee_raster(result.path, cfg)
+        err_buf = None  # GCOM-C は analysis_error 相当を持たない（信頼度は QA/海岸線で）
+    else:
+        result = fetch_mur.fetch_latest(cfg, Path(args.work_dir), target_date=target_date)
+        sst_buf, err_buf = process.load_dataset(result.path, cfg)
+
+    # 出所URL/識別子（データ源で属性名が異なるため吸収する）
+    source_url = getattr(result, "source_url", None) or getattr(result, "source", "")
 
     # バッファ付きグリッドのままフロントを計算し、表示範囲へクリップする
-    sst_buf, err_buf = process.load_dataset(result.path, cfg)
     front_buf = process.compute_front(sst_buf)
 
     sst = process.clip_bbox(sst_buf, bbox)
@@ -137,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     # 外部(CMEMS)が落ちていても、確実に取れている SST は必ず公開される
     export.export_all(
         sst=sst, err=err, front=front,
-        date=result.date, source_url=result.source_url, cfg=cfg,
+        date=result.date, source_url=source_url, cfg=cfg,
         archive_only=(target_date is not None),
     )
     log.info("SST / フロントを%s（%s）",
@@ -152,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
             chla_uncertainty=cb.uncertainty, chla_measured=cb.measured,
             chla_gradient=cb.gradient,
             chla_hires=cb.hires, chla_hires_date=cb.hires_date,
-            date=result.date, source_url=result.source_url, cfg=cfg,
+            date=result.date, source_url=source_url, cfg=cfg,
             archive_only=(target_date is not None),
         )
         log.info("クロロフィルを追記しました")

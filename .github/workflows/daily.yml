@@ -46,6 +46,9 @@ jobs:
           # クロロフィル（Copernicus Marine）用。未設定ならSSTのみで続行する
           CMEMS_USERNAME: ${{ secrets.CMEMS_USERNAME }}
           CMEMS_PASSWORD: ${{ secrets.CMEMS_PASSWORD }}
+          # GCOM-C 移行用（sst.source: gee のとき使用）。サービスアカウントJSON鍵。
+          # フェーズ0で登録。未設定でも source:erddap の現行運用には影響しない
+          GEE_SERVICE_ACCOUNT_KEY: ${{ secrets.GEE_SERVICE_ACCOUNT_KEY }}
           # CMEMS のメタデータ配信(s3.waw3-1.cloudferro.com)は GitHub から
           # 届かないことがある。遅いだけの時に拾えるよう接続を少し粘る
           # （取得コード側の fetch_timeout_sec と 30分ジョブ上限で暴走は防ぐ）
