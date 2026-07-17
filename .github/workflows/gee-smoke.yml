@@ -1,0 +1,37 @@
+name: gee-smoke
+
+# GEE 移行の最初の関門: サービスアカウント認証で GCOM-C SST を1枚取得できるか
+# だけを単独で確認する。docs/data には書き込まず、公開中のマップには影響しない。
+# 手動実行専用（Actions タブ → gee-smoke → Run workflow）。
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "取得する観測日 (YYYY-MM-DD)。空欄なら最新日"
+        required: false
+        default: ""
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: GEE 認証と SST 1枚取得の疎通確認
+        env:
+          GEE_SERVICE_ACCOUNT_KEY: ${{ secrets.GEE_SERVICE_ACCOUNT_KEY }}
+        run: |
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            python -m src.fetch_gee "${{ github.event.inputs.date }}"
+          else
+            python -m src.fetch_gee
+          fi

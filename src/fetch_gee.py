@@ -160,15 +160,25 @@ def fetch_sst(cfg: dict, out_dir: Path, target_date: dt.date | None = None) -> F
 def _smoke(argv=None) -> int:
     """認証と1枚取得の疎通確認（フェーズ1マイルストーン）。
 
-        python -m src.fetch_gee
+        python -m src.fetch_gee            # 最新日
+        python -m src.fetch_gee 2026-07-12 # 指定日
     """
     import sys
     import yaml
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    args = argv if argv is not None else sys.argv[1:]
+    target = None
+    if args and args[0].strip():
+        import re
+        try:
+            target = dt.date.fromisoformat(re.sub(r"[/_.\s]", "-", args[0].strip()))
+        except ValueError:
+            print(f"日付の形式が不正です: {args[0]!r}（YYYY-MM-DD）")
+            return 2
     cfg = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
     try:
-        res = fetch_sst(cfg, Path("work"))
+        res = fetch_sst(cfg, Path("work"), target_date=target)
         print(f"OK: {res.date} を取得 -> {res.path} ({res.source})")
         return 0
     except CredentialsMissing as e:
