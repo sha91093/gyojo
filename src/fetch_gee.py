@@ -180,6 +180,18 @@ def _smoke(argv=None) -> int:
     try:
         res = fetch_sst(cfg, Path("work"), target_date=target)
         print(f"OK: {res.date} を取得 -> {res.path} ({res.source})")
+        # スケール係数の検証: 実データを読み、物理値(℃)として妥当か確認する
+        # （290℃の海になっていないか。この確認をしてから本番切替する）
+        try:
+            from src import process
+            sst = process.load_gee_raster(res.path, cfg)
+            v = sst.values[__import__("numpy").isfinite(sst.values)]
+            if v.size:
+                print(f"SST値域チェック: min={v.min():.2f} mean={v.mean():.2f} "
+                      f"max={v.max():.2f} ℃ / 空間標準偏差={v.std():.3f}℃")
+                print("→ 夏の海として妥当（概ね20〜30℃）なら scale/offset は正しい")
+        except Exception as e:  # noqa: BLE001
+            print(f"（値域チェックは省略: {type(e).__name__}: {e}）")
         return 0
     except CredentialsMissing as e:
         print(f"認証情報なし: {e}")
