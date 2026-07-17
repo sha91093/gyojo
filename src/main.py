@@ -83,6 +83,36 @@ def _try_fetch_chla(cfg: dict, work_dir: Path) -> ChlaBundle:
     return bundle
 
 
+def _try_fetch_chla_gee(cfg: dict, work_dir: Path, sst_date) -> ChlaBundle:
+    """GCOM-C クロロフィル（GEE）を SST と同じ観測日で取得する。
+
+    同一センサ・同一日・同一格子なので「潮目×餌場」の重ね合わせが正しく成立する。
+    全面雲/未観測なら全 NaN → export 側でレイヤをスキップ。失敗しても SST は継続。
+    """
+    from src import fetch_gee
+    b = cfg["bbox"]
+    bundle = ChlaBundle()
+    if not cfg.get("gee", {}).get("chla"):
+        return bundle
+    try:
+        res = fetch_gee.fetch_chla(cfg, work_dir, target_date=sst_date)
+        chla = process.clip_bbox(process.load_gee_raster(res.path, cfg, kind="chla"), b)
+        # 有効ピクセルが無ければ（全面雲）レイヤを立てない
+        import numpy as _np
+        if not _np.isfinite(chla.values).any():
+            log.info("GCOM-C クロロフィルは全面雲/未観測のためスキップ（%s）", res.date)
+            return bundle
+        bundle.chla = chla
+        bundle.chla_date = res.date
+        # 勾配は雲穴を埋めないガード付きで算出
+        bundle.gradient = process.compute_chla_gradient(chla)
+    except fetch_gee.CredentialsMissing as exc:
+        log.warning("クロロフィル(GEE)をスキップ（認証情報なし）: %s", exc)
+    except Exception as exc:
+        log.warning("GCOM-Cクロロフィル取得に失敗（SSTは継続）: %s: %s", type(exc).__name__, exc)
+    return bundle
+
+
 def _parse_date(text: str | None):
     """観測日の文字列を date に変換する。空欄は None。
 
@@ -155,7 +185,11 @@ def main(argv: list[str] | None = None) -> int:
              "archive へ保存しました" if target_date else "公開しました", result.date)
 
     # --- クロロフィルは追記。取れたら meta を上書き再出力する ---
-    cb = _try_fetch_chla(cfg, Path(args.work_dir))
+    # gee のときは GCOM-C（SSTと同一センサ・同一日）、それ以外は Copernicus
+    if source == "gee":
+        cb = _try_fetch_chla_gee(cfg, Path(args.work_dir), sst_date=result.date)
+    else:
+        cb = _try_fetch_chla(cfg, Path(args.work_dir))
     if cb.chla is not None:
         export.export_all(
             sst=sst, err=err, front=front,

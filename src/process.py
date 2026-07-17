@@ -128,25 +128,29 @@ def spatial_std(da: xr.DataArray) -> float:
     return float(v.std()) if v.size else 0.0
 
 
-def load_gee_raster(tif_path, cfg: dict) -> xr.DataArray:
-    """GEE が出力した GeoTIFF（既に℃・スケール適用済み）を読む。
+def load_gee_raster(tif_path, cfg: dict, *, kind: str = "sst") -> xr.DataArray:
+    """GEE が出力した GeoTIFF（scale/offset 適用済み）を読む。
 
+    kind='sst'  … ℃。kind='chla' … mg/m^3（対数表示のため0以下を除外）。
     バッファ付きの取得範囲のまま返す（クリップは呼び出し側）。
-    fetch_gee 側で scale/offset を適用しているのでここでは単位変換しない。
     """
     da = rioxarray.open_rasterio(tif_path, masked=True)
     if "band" in da.dims:
         da = da.isel(band=0, drop=True)
     da = da.rename({"y": "lat", "x": "lon"})
-    # GEE の GeoTIFF は 0 や極端値を欠測にしていることがあるため NaN 化の保険
-    da = da.where(np.isfinite(da))
-    da = _normalize(da).assign_attrs(units="degree_C")
+    da = da.where(np.isfinite(da))  # 極端値の欠測化保険
+    da = _normalize(da)
+    if kind == "chla":
+        da = da.where(da > 0).assign_attrs(units="mg m-3")
+        label, unit = "GCOM-C クロロフィル", "mg/m^3"
+    else:
+        da = da.assign_attrs(units="degree_C")
+        label, unit = "GCOM-C SST", "℃"
     finite = da.values[np.isfinite(da.values)]
     if finite.size:
-        log.info(
-            "GCOM-C SST 読み込み: %d x %d px, %.2f〜%.2f ℃",
-            da.sizes["lon"], da.sizes["lat"], float(finite.min()), float(finite.max()),
-        )
+        log.info("%s 読み込み: %d x %d px, %.3f〜%.3f %s",
+                 label, da.sizes["lon"], da.sizes["lat"],
+                 float(finite.min()), float(finite.max()), unit)
     return da
 
 
@@ -231,7 +235,8 @@ def compute_chla_gradient(chla: xr.DataArray) -> xr.DataArray:
     穴のない広域データに対して SST フロントと同じ Sobel 法を使う。
     L3(300m)は雲で穴だらけのため勾配計算に使わない（大穴を埋めると虚構になる）。
     """
-    grad = compute_front(chla)  # 同じ Sobel + cos(lat) 正規化を流用
+    # 雲穴の多い光学データなので、有効近傍が5px以上ある所だけ勾配を出す
+    grad = compute_front(chla, min_valid_neighbors=5)
     grad.attrs.update(units="mg m-3 km-1", long_name="chlorophyll gradient")
     grad = grad.rio.set_spatial_dims(x_dim="lon", y_dim="lat")
     return grad.rio.write_crs("EPSG:4326")
@@ -276,13 +281,17 @@ def measured_mask_on(broad: xr.DataArray, hires: xr.DataArray) -> np.ndarray:
     return measured
 
 
-def compute_front(sst: xr.DataArray) -> xr.DataArray:
+def compute_front(sst: xr.DataArray, min_valid_neighbors: int | None = None) -> xr.DataArray:
     """水温フロント強度 (℃/km) を計算する。
 
     - Sobel フィルタで x/y 勾配を推定（カーネル和のスケール 8 で割って ℃/px に）
     - ピクセル実距離で割って ℃/km に正規化
     - 経度方向のピクセル幅は cos(lat) で緯度ごとに補正する
     - バッファ付きグリッドに対して呼び、結果を clip_bbox すること
+
+    min_valid_neighbors を指定すると、3x3 近傍の有効ピクセルがその数未満の
+    ピクセルの勾配を捨てる。雲で穴だらけの光学データ（GCOM-C クロロフィル）で
+    大穴を最近傍で埋めて偽の勾配を描くのを防ぐ（陸1pxの海=通常8近傍なので残る）。
     """
     data = sst.values.astype("float64")
     valid = np.isfinite(data)
@@ -315,6 +324,13 @@ def compute_front(sst: xr.DataArray) -> xr.DataArray:
 
     # 陸のみ再マスクする（海ピクセルは岸沿いも含めて全て残る）
     strength[~valid] = np.nan
+
+    # 雲の大穴対策: 3x3 の有効近傍が乏しいピクセルの勾配は捨てる
+    if min_valid_neighbors is not None:
+        vcount = ndimage.uniform_filter(
+            valid.astype("float64"), size=3, mode="constant"
+        ) * 9.0
+        strength[vcount < float(min_valid_neighbors)] = np.nan
 
     front = xr.DataArray(
         strength,

@@ -107,11 +107,24 @@ gee:
     # カタログ確認済み: 物理値 = raw * scale + offset（℃）
     scale: 0.0012
     offset: -10.0
-    # 昼夜フィルタ SATELLITE_DIRECTION=='D'。SST は夜間も有効なので既定OFF。
-    # TODO: 昼夜の扱いは実データを見て検討する
+    # 昼夜フィルタ SATELLITE_DIRECTION（カタログ確認: A=夜間 / D=昼間）。
+    # 実データは夜間SST（基準SSTとして日中加熱を含まず適切）。既定OFFで運用
     daytime_only: false
+  chla:
+    collection: JAXA/GCOM-C/L3/OCEAN/CHLA/V3
+    band: CHLA_AVE
+    qa_band: CHLA_QA_flag
+    # カタログ確認済み: 物理値(mg/m^3) = raw * scale（log10は表示側で行う）
+    scale: 0.0016
+    offset: 0.0
+    # 海色は太陽光が要るため昼間(D)のみ
+    daytime_only: true
+  # QAフラグの陸率ビット（bit0-1: 0=海/1=ほぼ海/2=沿岸/3=陸）。
+  # この値以上を沿岸汚染として扱う（2=沿岸以上）。当面は分布ログのみで
+  # 半透明化は海岸線距離側に任せる。TODO: QA併用の是非を実データで判断
+  qa_landfrac_coastal_min: 2
 
-# クロロフィルa（フェーズ2b / Copernicus Marine）
+# クロロフィルa（データ源 erddap 時のフォールバック / Copernicus Marine）
 chla:
   # 取得を有効にするか。認証情報が無い環境では自動でスキップされる
   enabled: true

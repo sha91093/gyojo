@@ -232,8 +232,14 @@ def export_all(
 
     cdisp = cfg["chla"]["display"]
     unc_th = cfg["chla"].get("confidence", {}).get("uncertainty_threshold")
+    # データ源で出所ラベルと「補間か欠測か」が変わる
+    is_gee = cfg["sst"].get("source") == "gee"
+    chla_src = ("GCOM-C/SGLI (JAXA), processed via Google Earth Engine" if is_gee
+               else "Copernicus Marine gap-free L4 (OCEANCOLOUR_GLO_BGC_L4_NRT_009_102)")
+    # gapfilled=true なら雲域は補間値、false なら雲域は欠測（無色）
+    chla_gapfilled = not is_gee
 
-    # --- クロロフィル（広域 L4 gap-free） ---
+    # --- クロロフィル ---
     if chla is not None:
         # 実測カバー率（L3被覆由来）。0%なら「この日は実測ゼロ＝全て補間値」
         coverage = None
@@ -251,8 +257,8 @@ def export_all(
             cvmin, cvmax = log_auto_range(chla.values, cdisp)
             layers["chla"] = {
                 "date": (chla_date or date).isoformat(),
-                "source": "Copernicus Marine gap-free L4 (OCEANCOLOUR_GLO_BGC_L4_NRT_009_102)",
-                "variable": str(cfg["chla"]["variable"]),
+                "source": chla_src,
+                "variable": str(cfg["gee"]["chla"]["band"] if is_gee else cfg["chla"]["variable"]),
                 "units": "mg/m³",
                 "cog": "chla.tif",
                 "values": "chla_values.json",
@@ -260,8 +266,9 @@ def export_all(
                 "colormap": cdisp.get("colormap", "algae"),
                 "vmin": cvmin,
                 "vmax": cvmax,
-                "measured_coverage_pct": coverage,  # 0=全て補間値, None=不明
-                "error_threshold": unc_th,  # CHL_uncertainty の半透明化閾値（未校正なら null）
+                "gapfilled": chla_gapfilled,          # false=雲域は欠測（GCOM-C）
+                "measured_coverage_pct": coverage,    # 0=全て補間値, None=不明
+                "error_threshold": unc_th,
                 "stats": chla_payload["stats"],
             }
             written += ["chla.tif", "chla_values.json"]

@@ -62,14 +62,18 @@ def _bbox_geom(ee, cfg: dict):
     return ee.Geometry.Rectangle([b["min_lon"], b["min_lat"], b["max_lon"], b["max_lat"]])
 
 
-def _probe_and_fetch(q, cfg, key_json, out_dir, prefix, target_iso):
-    """子プロセス: 認証→最新(or指定)画像を特定→GeoTIFFをダウンロード。"""
+def _probe_and_fetch(q, cfg, key_json, out_dir, prefix, layer_key, target_iso):
+    """子プロセス: 認証→最新(or指定)画像を特定→GeoTIFFをダウンロード。
+
+    layer_key は cfg["gee"] 内のサブ設定名（"sst" / "chla"）。
+    物理値 = raw * scale + offset にして単一バンドで落とす。
+    """
     diag = None
     try:
         import requests
 
         ee = _init_ee(cfg, key_json)
-        s = cfg["gee"]["sst"]
+        s = cfg["gee"][layer_key]
         geom = _bbox_geom(ee, cfg)
 
         col = ee.ImageCollection(s["collection"]).filterBounds(geom)
@@ -92,25 +96,27 @@ def _probe_and_fetch(q, cfg, key_json, out_dir, prefix, target_iso):
         img = ee.Image(col.first())
         date_iso = img.date().format("YYYY-MM-dd").getInfo()
 
-        # 物理値(℃) = raw * scale + offset
-        sst = img.select(s["band"]).multiply(float(s["scale"])).add(float(s["offset"])).rename("sst")
+        # 物理値 = raw * scale + offset（SST:℃ / CHLA:mg/m^3。log10 は表示側）
+        val = (img.select(s["band"]).multiply(float(s["scale"]))
+               .add(float(s.get("offset", 0.0))).rename("val"))
 
-        # QA の分布をログ用に確認（ビット定義未確認のため使用はしない）
+        # QA の陸率ビット(bit0-1)分布をログ用に確認（0=海/1=ほぼ海/2=沿岸/3=陸）
         try:
-            qa_hist = img.select(s["qa_band"]).reduceRegion(
+            landfrac = img.select(s["qa_band"]).bitwiseAnd(3)
+            qa_hist = landfrac.reduceRegion(
                 reducer=ee.Reducer.frequencyHistogram(), geometry=geom,
                 scale=int(cfg["gee"]["download_scale_m"]), maxPixels=1e8,
             ).getInfo()
-            diag = f"{prefix} {date_iso} QA分布(先頭)={str(qa_hist)[:200]}"
+            diag = f"{prefix} {date_iso} 陸率QA分布(0海/1ほぼ海/2沿岸/3陸)={str(qa_hist)[:180]}"
         except Exception:
             diag = f"{prefix} {date_iso} QA分布の取得は省略"
 
-        url = sst.getDownloadURL({
+        url = val.getDownloadURL({
             "region": geom,
             "scale": int(cfg["gee"]["download_scale_m"]),
             "crs": "EPSG:4326",
             "format": "GEO_TIFF",
-            "bands": ["sst"],
+            "bands": ["val"],
         })
         r = requests.get(url, timeout=120)
         r.raise_for_status()
@@ -124,7 +130,8 @@ def _probe_and_fetch(q, cfg, key_json, out_dir, prefix, target_iso):
         q.put(("err", f"{type(exc).__name__}: {exc}", diag))
 
 
-def _fetch(cfg: dict, out_dir: Path, prefix: str, target_date: dt.date | None) -> FetchResult:
+def _fetch(cfg: dict, out_dir: Path, prefix: str, layer_key: str,
+           target_date: dt.date | None) -> FetchResult:
     key_json = _key_json(cfg)
     out_dir.mkdir(parents=True, exist_ok=True)
     timeout = int(cfg["gee"].get("fetch_timeout_sec", 180))
@@ -132,7 +139,8 @@ def _fetch(cfg: dict, out_dir: Path, prefix: str, target_date: dt.date | None) -
 
     ctx = multiprocessing.get_context("fork")
     q = ctx.Queue()
-    p = ctx.Process(target=_probe_and_fetch, args=(q, cfg, key_json, out_dir, prefix, target_iso))
+    p = ctx.Process(target=_probe_and_fetch,
+                    args=(q, cfg, key_json, out_dir, prefix, layer_key, target_iso))
     p.start()
     p.join(timeout)
     if p.is_alive():
@@ -154,7 +162,17 @@ def _fetch(cfg: dict, out_dir: Path, prefix: str, target_date: dt.date | None) -
 
 def fetch_sst(cfg: dict, out_dir: Path, target_date: dt.date | None = None) -> FetchResult:
     """GCOM-C SST を取得して GeoTIFF(℃) を out_dir に保存する。"""
-    return _fetch(cfg, out_dir, "gcomc_sst", target_date)
+    return _fetch(cfg, out_dir, "gcomc_sst", "sst", target_date)
+
+
+def fetch_chla(cfg: dict, out_dir: Path, target_date: dt.date | None = None) -> FetchResult:
+    """GCOM-C クロロフィルを取得して GeoTIFF(mg/m^3) を out_dir に保存する。
+
+    SST と同一センサ。同一日で揃えたいので target_date に SST の観測日を渡す。
+    昼間パスのみ（海色は太陽光が要る）。全面雲/未観測なら全 NaN になり
+    呼び出し側でレイヤをスキップする。
+    """
+    return _fetch(cfg, out_dir, "gcomc_chla", "chla", target_date)
 
 
 def _smoke(argv=None) -> int:

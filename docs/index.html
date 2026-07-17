@@ -367,8 +367,12 @@
     return [[w, n], [e, n], [e, s], [w, s]];
   }
 
-  // 広域クロロフィルの「実測カバー率」注記。0% は全て補間値なので強く警告する
+  // クロロフィルの信頼度注記。
+  // gapfilled=false（GCOM-C）は雲域が欠測（無色）。true（旧CMEMS）は補間値。
   function coverageNote(layerMeta) {
+    if (layerMeta.gapfilled === false) {
+      return "実測値。雲やその日撮影がない海域は欠測（無色）です。";
+    }
     const cov = layerMeta.measured_coverage_pct;
     if (cov == null) return "雲を補間で埋めた値を含みます。";
     if (cov <= 0) {
