@@ -19,10 +19,10 @@ bbox:
 bbox_buffer_deg: 0.15
 
 sst:
-  # 取得元スイッチ: erddap（現行 MUR）/ gee（GCOM-C/SGLI 移行先）。
-  # GEE 移行は認証(サービスアカウント)が Actions から通ることを確認できるまで
-  # erddap のまま運用し、検証後に gee へ切り替える（現行公開を止めないため）
-  source: erddap
+  # 取得元スイッチ: erddap（旧 MUR）/ gee（GCOM-C/SGLI 現行）。
+  # gee-smoke で認証・取得・スケール係数(23.8〜27.4℃, std0.909)を検証し
+  # GCOM-C へ移行。MUR は速報性・ならされ問題のため運用終了（コードは当面残す）
+  source: gee
   erddap:
     base_url: https://coastwatch.pfeg.noaa.gov/erddap
     dataset_id: jplMURSST41
